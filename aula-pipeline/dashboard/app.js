@@ -1,4 +1,20 @@
 const API_BASE = "";
+const FALLBACK_COLUMNS = [
+  ["proximas_aulas", "Próximas aulas"],
+  ["bibliografia_em_geracao", "Bibliografia em geração"],
+  ["bibliografia_pronta", "Bibliografia pronta"],
+  ["aguardando_aprovacao_fontes", "Aguardando aprovação das fontes"],
+  ["aguardando_pdfs", "Aguardando PDFs"],
+  ["pdfs_adicionados", "PDFs adicionados"],
+  ["texto_em_producao", "Texto em produção"],
+  ["texto_pronto_revisao", "Texto pronto para revisão"],
+  ["texto_revisado", "Texto revisado"],
+  ["slides_em_producao", "Slides em produção"],
+  ["pptx_pronto", "PPTX pronto"],
+  ["revisao_final", "Revisão final"],
+  ["concluida", "Concluída"],
+  ["erro_bloqueada", "Erro / bloqueada"],
+];
 
 const ACTIONS = [
   { route: "avancar-etapa", label: "Avançar etapa" },
@@ -29,6 +45,7 @@ let state = null;
 let columns = [];
 let selectedAulaId = null;
 const driveFilesCache = new Map();
+let apiAvailable = true;
 let filters = {
   module: "",
   theme: "",
@@ -94,7 +111,10 @@ async function loadAll(showMessage = false) {
 
     if (showMessage) showToast("Kanban sincronizado.");
   } catch (err) {
-    showToast(`Erro: ${err.message}`, true);
+    const loadedFallback = await tryLoadStaticFallback();
+    if (!loadedFallback) {
+      showToast(`Erro: ${err.message}`, true);
+    }
   }
 }
 
@@ -291,6 +311,10 @@ function buildDetailHtml(aula) {
 }
 
 async function runAction(aulaId, route) {
+  if (!apiAvailable) {
+    showToast("Ações desabilitadas no GitHub Pages (modo somente leitura).", true);
+    return;
+  }
   try {
     const res = await fetch(`${API_BASE}/api/aulas/${aulaId}/actions/${route}`, {
       method: "POST",
@@ -312,6 +336,10 @@ async function runAction(aulaId, route) {
 }
 
 async function runDriveBootstrap() {
+  if (!apiAvailable) {
+    showToast("Drive indisponível no GitHub Pages (modo somente leitura).", true);
+    return;
+  }
   driveBootstrapBtn.disabled = true;
   try {
     const res = await fetch(`${API_BASE}/api/drive/bootstrap`, {
@@ -346,6 +374,10 @@ async function handleDriveAction(aulaId, driveAction, fromCard = false) {
 }
 
 async function listDriveFilesForAula(aulaId, forceOpenDetail = false) {
+  if (!apiAvailable) {
+    showToast("Drive indisponível no GitHub Pages (modo somente leitura).", true);
+    return;
+  }
   if (forceOpenDetail && selectedAulaId !== aulaId) {
     openDetail(aulaId);
   }
@@ -368,6 +400,10 @@ async function listDriveFilesForAula(aulaId, forceOpenDetail = false) {
 }
 
 async function uploadFileForAula(aulaId, forceOpenDetail = false) {
+  if (!apiAvailable) {
+    showToast("Upload indisponível no GitHub Pages (modo somente leitura).", true);
+    return;
+  }
   const aula = state?.aulas?.find((item) => item.id === aulaId);
   if (!aula) {
     showToast("Aula não encontrada no estado atual.", true);
@@ -525,4 +561,24 @@ function normalizeText(v) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+async function tryLoadStaticFallback() {
+  try {
+    const res = await fetch("../data/aulas.json");
+    if (!res.ok) return false;
+    state = await res.json();
+    columns = FALLBACK_COLUMNS;
+    apiAvailable = false;
+    populateModuleFilter();
+    renderStats();
+    renderBoard();
+    if (selectedAulaId) {
+      openDetail(selectedAulaId);
+    }
+    showToast("Modo GitHub Pages: visualização estática carregada.");
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
