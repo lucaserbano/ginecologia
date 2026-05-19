@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kanban - Produção de Aulas Gineco</title>
+    <link rel="stylesheet" href="/dashboard/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Kanban de Produção de Aulas</h1>
+        <p class="subtitle">Pipeline local · Ginecologia · FastAPI + HTML/JS</p>
+      </div>
+      <div class="actions">
+        <label class="filter-inline">
+          <span>Módulo</span>
+          <select id="filter-module">
+            <option value="">Todos</option>
+          </select>
+        </label>
+        <label class="filter-inline">
+          <span>Tema</span>
+          <input id="filter-theme" type="search" placeholder="Buscar tema..." />
+        </label>
+        <button id="btn-clear-filters" class="btn secondary">Limpar filtros</button>
+        <button id="btn-sync" class="btn secondary">Sincronizar</button>
+      </div>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <main>
+      <section id="board" class="board" aria-label="Kanban"></section>
+    </main>
+
+    <aside id="detail" class="detail hidden" aria-live="polite">
+      <div class="detail-head">
+        <h2 id="detail-title">Detalhes da aula</h2>
+        <button id="detail-close" class="btn ghost">Fechar</button>
+      </div>
+      <div id="detail-content" class="detail-content"></div>
+    </aside>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/dashboard/app.js"></script>
+  </body>
+</html>

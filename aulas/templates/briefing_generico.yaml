@@ -1,0 +1,23 @@
+tema_aula: "X"
+idioma_saida: "pt-BR"
+publico_alvo: "Medicos pos-graduandos em Ginecologia"
+duracao_alvo_minutos: "8-10"
+formato_texto:
+  paragrafos_totais_estimados: "7-9"
+  paragrafos_por_bloco_slide: "2-3"
+  separador_blocos: "---"
+  usar_titulos_de_slide: false
+  usar_marcacoes_de_roteiro: false
+  usar_timestamps: false
+estilo:
+  tecnico: true
+  didatico: true
+  dialogado: true
+  incluir_perguntas_retoricas: true
+  usar_linguagem_ativa_direta: true
+regras_criticas:
+  nao_sugerir_aprofundamento_ou_leitura: true
+  nao_alucinar_ou_inventar_informacoes: true
+  usar_apenas_fontes_fornecidas: true
+  citar_fontes_nos_pontos_relevantes: true
+instrucoes_adicionais: null

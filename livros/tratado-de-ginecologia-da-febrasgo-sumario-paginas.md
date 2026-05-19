@@ -1,0 +1,113 @@
+# Sumário com Páginas - Tratado de Ginecologia da FEBRASGO
+
+- Arquivo fonte: `livros/tratado-de-ginecologia-da-febrasgo.pdf`
+- Total de páginas no PDF: **2717**
+- Regra usada: cada tema cobre da página inicial até a página anterior ao próximo tema no mesmo nível (ou nível superior).
+
+## Índice por temas (com intervalo de páginas)
+
+- **Folha de Rosto** — pág. 8
+- **Copyright** — pág. 9-11
+- **Frebasgo** — pág. 12-18
+- **Apresentação** — pág. 19-23
+- **Prefácio** — pág. 24-28
+- **Organizadores** — pág. 29-30
+- **Autores** — pág. 31-53
+- **Sumário** — pág. 54-69
+- **Fundamentos** — pág. 70-265
+  - **1. Anatomia das mamas e dos órgãos genitais femininos** — pág. 71-99
+  - **2. Embriologia e diferenciação sexual** — pág. 100-125
+  - **3. Fisiologia menstrual** — pág. 126-149
+  - **4. A consulta ginecológica** — pág. 150-178
+  - **5. Relação médico-paciente** — pág. 179-193
+  - **6. Ética e ginecologia** — pág. 194-238
+  - **7. Imunização** — pág. 239-265
+- **Sexologia** — pág. 266-336
+  - **8. Resposta sexual humana** — pág. 267-291
+  - **9. Anamnese em sexologia e critérios diagnósticos das disfunções sexuais** — pág. 292-313
+  - **10. Tratamento das disfunções sexuais no consultório do ginecologista** — pág. 314-336
+- **Diagnóstico em ginecologia** — pág. 337-561
+  - **11. Colpocitologia oncológica** — pág. 338-368
+  - **12. Genitoscopia** — pág. 369-399
+  - **13. Imagem em ginecologia – ultrassonografia** — pág. 400-455
+  - **14. Biologia molecular em ginecologia** — pág. 456-483
+  - **15. Genética em ginecologia** — pág. 484-520
+  - **16. Imagem em mastologia** — pág. 521-561
+- **Ginecologia infanto-puberal** — pág. 562-743
+  - **17 A consulta da criança e da adolescente** — pág. 563-586
+  - **18 Distúrbios do desenvolvimento sexual** — pág. 587-646
+  - **19 Puberdade normal, precoce e tardia** — pág. 647-679
+  - **20. Abordagem das queixas ginecológicas mais comuns na infância** — pág. 680-704
+  - **21. Tumores genitais na infância e na adolescência** — pág. 705-743
+- **Infecções** — pág. 744-889
+  - **22. Úlceras genitais** — pág. 745-766
+  - **23. Vaginites e vaginoses** — pág. 767-807
+  - **24. Cervicites e uretrites** — pág. 808-829
+  - **25. Doença inflamatória pélvica (dip)** — pág. 830-860
+  - **26. Infecção pelo HPV** — pág. 861-889
+- **Ginecologia geral** — pág. 890-1226
+  - **27. Dismenorreia** — pág. 891-907
+  - **28. Síndrome pré-menstrual** — pág. 908-936
+  - **29. Mioma uterino** — pág. 937-979
+  - **30. Pólipo Uterino** — pág. 980-1006
+  - **31. Adenomiose** — pág. 1007-1028
+  - **32. Endometriose** — pág. 1029-1060
+  - **33. Dor pélvica crônica** — pág. 1061-1096
+  - **34. Tumores anexiais** — pág. 1097-1123
+  - **35. Doenças benignas da vulva e vagina** — pág. 1124-1174
+  - **36. Abdome agudo em ginecologia** — pág. 1175-1197
+  - **37. Atenção à vítima de violência sexual** — pág. 1198-1226
+- **Ginecologia endócrina** — pág. 1227-1436
+  - **38. Amenorreia** — pág. 1228-1257
+  - **39. Síndrome dos ovários policísticos** — pág. 1258-1292
+  - **40. Hiperandrogenismo** — pág. 1293-1326
+  - **41. Hiperprolactinemia** — pág. 1327-1356
+  - **42. Sangramento uterino anormal** — pág. 1357-1388
+  - **43. Insuficiência ovariana prematura** — pág. 1389-1413
+  - **44. Terapêutica androgênica** — pág. 1414-1436
+- **Reprodução humana** — pág. 1437-1679
+  - **45. Conceitos, epidemiologia e etiologia do casal infértil** — pág. 1438-1467
+  - **46. Propedêutica básica do casal infértil** — pág. 1468-1508
+  - **47. Protocolos de indução de ovulação** — pág. 1509-1531
+  - **48. Tratamento de baixa complexidade para o casal infértil** — pág. 1532-1565
+  - **49. Tratamento de alta complexidade para o casal infértil** — pág. 1566-1594
+  - **50. Perda gestacional recorrente** — pág. 1595-1622
+  - **51. Preservação da fertilidade** — pág. 1623-1653
+  - **52. Ética em reprodução assistida** — pág. 1654-1679
+- **Climatério** — pág. 1680-1871
+  - **53. Climatério: conceito, epidemiologia, patogenia e consequências do hipoestrogenismo** — pág. 1681-1694
+  - **54. Terapêutica hormonal: benefícios, riscos e regimes terapêuticos** — pág. 1695-1720
+  - **55. Terapêutica hormonal e doença cardiovascular** — pág. 1721-1761
+  - **56. Terapêutica hormonal e câncer** — pág. 1762-1786
+  - **57. Tratamento não hormonal dos sintomas climatéricos** — pág. 1787-1806
+  - **58. Osteoporose pós-menopáusica** — pág. 1807-1871
+- **Uroginecologia** — pág. 1872-2066
+  - **59. Fisiologia da micção** — pág. 1873-1884
+  - **60. Propedêutica em uroginecologia** — pág. 1885-1914
+  - **61. Bexiga hiperativa** — pág. 1915-1939
+  - **62. Incontinência urinária de esforço** — pág. 1940-1966
+  - **63. Infecção do trato urinário** — pág. 1967-1988
+  - **64. Síndrome da bexiga dolorosa** — pág. 1989-2019
+  - **65. Prolapso dos órgãos genitais** — pág. 2020-2051
+  - **66. Fístulas e lesões urinárias em cirurgias ginecológicas** — pág. 2052-2066
+- **Planejamento familiar** — pág. 2067-2253
+  - **67. Planejamento familiar: conceitos, princípios gerais e critérios de elegibilidade dos métodos anticoncepcionais** — pág. 2068-2084
+  - **68. Métodos anticoncepcionais comportamentais, de barreira e cirúrgicos** — pág. 2085-2124
+  - **69. Anticoncepcional hormonal combinado** — pág. 2125-2143
+  - **70. Anticoncepcional hormonal só de progestagênio e anticoncepção de emergência** — pág. 2144-2173
+  - **71. Métodos anticoncepcionais reversíveis de longa duração** — pág. 2174-2226
+  - **72. Anticoncepção nos extremos reprodutivos: adolescência e perimenopausa** — pág. 2227-2253
+- **Oncologia ginecológica** — pág. 2254-2421
+  - **73. Lesões pré-invasivas da vulva, vagina e colo uterino** — pág. 2255-2284
+  - **74. Câncer de vulva e vagina** — pág. 2285-2311
+  - **75. Câncer do colo uterino** — pág. 2312-2350
+  - **76. Hiperplasia endometrial e câncer do corpo uterino** — pág. 2351-2395
+  - **77. Câncer de ovário e tubas uterinas** — pág. 2396-2421
+- **Mastologia** — pág. 2422-2635
+  - **78. Doenças benignas da mama** — pág. 2423-2463
+  - **79. Rastreamento do câncer de mama e propedêutica mamária** — pág. 2464-2499
+  - **80. Abordagem clínica das lesões mamárias palpáveis e não palpáveis** — pág. 2500-2534
+  - **81. Lesões precursoras do câncer de mama (hiperplasias atípicas e carcinomas in situ)** — pág. 2535-2575
+  - **82. Câncer de mama** — pág. 2576-2609
+  - **83. Abordagem clínica dos grupos de risco elevado para câncer de mama** — pág. 2610-2635
+- **Índice remissivo** — pág. 2636-2717

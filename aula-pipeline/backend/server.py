@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from drive_client import DriveAuthError, build_drive
+from drive_sync import bootstrap_drive_structure, list_aula_drive_files, upload_local_file_for_aula
+from pipeline_simulado import run_action
+from schemas import (
+    ACTION_KEY_BY_ROUTE,
+    STATUS_COLUMNS,
+    ActionRequest,
+    ActionResponse,
+    AulaItem,
+    AulasState,
+    DriveUploadRequest,
+)
+from settings import DRIVE_ROOT_FOLDER_ID, ensure_drive_env
+from store import REPO_ROOT, load_state, save_state, synchronize_with_filesystem, write_bootstrap_state
+
+APP_ROOT = Path(__file__).resolve().parents[1]
+DASHBOARD_DIR = APP_ROOT / "dashboard"
+
+app = FastAPI(title="Kanban Aulas Gineco", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/dashboard", StaticFiles(directory=str(DASHBOARD_DIR), html=False), name="dashboard")
+
+
+@app.on_event("startup")
+def startup_bootstrap() -> None:
+    write_bootstrap_state()
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(DASHBOARD_DIR / "index.html")
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {"ok": True}
+
+
+@app.get("/api/drive/status")
+def drive_status() -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        return {"ok": False, "authorized": False, "message": message}
+    try:
+        build_drive(interactive=False)
+        return {"ok": True, "authorized": True, "message": "Drive OAuth pronto."}
+    except Exception as exc:
+        return {"ok": False, "authorized": False, "message": str(exc)}
+
+
+@app.post("/api/drive/auth-start")
+def drive_auth_start() -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        build_drive(interactive=True)
+        return {"ok": True, "message": "Autorização OAuth concluída e token salvo."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha na autorização OAuth: {exc}")
+
+
+@app.post("/api/drive/bootstrap")
+def drive_bootstrap() -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        service = build_drive(interactive=False)
+    except DriveAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+    try:
+        summary = bootstrap_drive_structure(state, service, DRIVE_ROOT_FOLDER_ID)
+        save_state(state)
+        return {"ok": True, "message": "Estrutura de pastas no Drive sincronizada.", "summary": summary}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha no bootstrap do Drive: {exc}")
+
+
+@app.get("/api/columns")
+def get_columns() -> dict:
+    return {"columns": STATUS_COLUMNS}
+
+
+@app.get("/api/aulas", response_model=AulasState)
+def list_aulas() -> AulasState:
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+    save_state(state)
+    return state
+
+
+@app.get("/api/aulas/{aula_id}", response_model=AulaItem)
+def get_aula(aula_id: str) -> AulaItem:
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+    for aula in state.aulas:
+        if aula.id == aula_id:
+            save_state(state)
+            return aula
+    raise HTTPException(status_code=404, detail="Aula não encontrada")
+
+
+@app.get("/api/aulas/{aula_id}/drive-files")
+def get_aula_drive_files(aula_id: str) -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        service = build_drive(interactive=False)
+    except DriveAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada. Rode /api/drive/bootstrap.")
+
+    try:
+        files = list_aula_drive_files(aula, service)
+        save_state(state)
+        return {"ok": True, "aula_id": aula.id, "count": len(files), "files": files}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha ao listar arquivos no Drive: {exc}")
+
+
+@app.post("/api/aulas/{aula_id}/upload")
+def upload_aula_file(aula_id: str, payload: DriveUploadRequest) -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        service = build_drive(interactive=False)
+    except DriveAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada. Rode /api/drive/bootstrap.")
+
+    local_path = REPO_ROOT / payload.local_relative_path
+    if not local_path.exists():
+        raise HTTPException(status_code=404, detail=f"Arquivo local não encontrado: {payload.local_relative_path}")
+
+    try:
+        uploaded = upload_local_file_for_aula(
+            aula=aula,
+            drive_service=service,
+            local_path=local_path,
+            target_subfolder=payload.target_subfolder,
+            target_name=payload.target_name,
+        )
+        save_state(state)
+        return {"ok": True, "message": "Upload concluído.", "file": uploaded}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha no upload para Drive: {exc}")
+
+
+@app.post("/api/aulas/{aula_id}/actions/{action_route}", response_model=ActionResponse)
+def run_aula_action(aula_id: str, action_route: str, payload: Optional[ActionRequest] = None) -> ActionResponse:
+    note = payload.note if payload else None
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+
+    if action_route not in ACTION_KEY_BY_ROUTE:
+        raise HTTPException(status_code=404, detail="Ação não encontrada")
+
+    action_key = ACTION_KEY_BY_ROUTE[action_route]
+
+    if action_key == "abrir_pasta":
+        ok, message = _open_folder(aula.pasta_absoluta)
+        save_state(state)
+        return ActionResponse(ok=ok, message=message, aula=aula)
+
+    aula, message = run_action(aula, action_key, note=note)
+    save_state(state)
+
+    ok = not message.startswith("Ação '")
+    return ActionResponse(ok=ok, message=message, aula=aula)
+
+
+def _find_aula(state: AulasState, aula_id: str) -> Optional[AulaItem]:
+    for aula in state.aulas:
+        if aula.id == aula_id:
+            return aula
+    return None
+
+
+def _open_folder(path_str: str) -> tuple[bool, str]:
+    path = Path(path_str)
+    if not path.exists():
+        return False, "Pasta da aula não existe mais no filesystem."
+
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(["open", str(path)], check=False, capture_output=True, text=True)
+        elif os.name == "nt":
+            result = subprocess.run(["explorer", str(path)], check=False, capture_output=True, text=True)
+        else:
+            result = subprocess.run(["xdg-open", str(path)], check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True, "Pasta aberta no sistema."
+        stderr = (result.stderr or "").strip()
+        return False, f"Falha ao abrir pasta: {stderr or 'erro desconhecido'}"
+    except Exception as exc:
+        return False, f"Falha ao abrir pasta: {exc}"
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("server:app", host="127.0.0.1", port=8787, reload=True)

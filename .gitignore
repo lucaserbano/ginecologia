@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Local env/secrets
+.env
+*.env
+
+# Drive OAuth secrets/tokens
+/aula-pipeline/backend/credentials/
+/aula-pipeline/backend/token.json
+
+# Misc
+*.log
+
+# Large assets kept in Google Drive
+/livros/*.pdf
+/aulas_em_producao/**/*.pdf
+/aulas_em_producao/**/*.pptx
