@@ -28,6 +28,7 @@ const NEXT_ACTION_TO_ROUTE = {
 let state = null;
 let columns = [];
 let selectedAulaId = null;
+const driveFilesCache = new Map();
 let filters = {
   module: "",
   theme: "",
@@ -41,12 +42,14 @@ const detailContentEl = document.getElementById("detail-content");
 const toastEl = document.getElementById("toast");
 
 const syncBtn = document.getElementById("btn-sync");
+const driveBootstrapBtn = document.getElementById("btn-drive-bootstrap");
 const detailCloseBtn = document.getElementById("detail-close");
 const moduleFilterEl = document.getElementById("filter-module");
 const themeFilterEl = document.getElementById("filter-theme");
 const clearFiltersBtn = document.getElementById("btn-clear-filters");
 
 syncBtn.addEventListener("click", () => loadAll(true));
+driveBootstrapBtn.addEventListener("click", runDriveBootstrap);
 detailCloseBtn.addEventListener("click", closeDetail);
 moduleFilterEl.addEventListener("change", () => {
   filters.module = moduleFilterEl.value;
@@ -172,6 +175,8 @@ function buildCard(aula) {
     <div class="card-actions">
       <button class="btn next-action ${nextClass}" data-action="${nextRoute}" data-id="${aula.id}">Executar próxima ação</button>
       <button class="btn secondary" data-action="voltar-etapa" data-id="${aula.id}">Voltar etapa</button>
+      <button class="btn secondary" data-drive-action="list-files" data-id="${aula.id}">Listar Drive</button>
+      <button class="btn secondary" data-drive-action="upload-file" data-id="${aula.id}">Upload Drive</button>
       <button class="btn secondary" data-detail="${aula.id}">Detalhes</button>
     </div>
   `;
@@ -181,6 +186,12 @@ function buildCard(aula) {
     btn.addEventListener("click", async (e) => {
       const target = e.currentTarget;
       await runAction(target.dataset.id, target.dataset.action);
+    });
+  });
+  card.querySelectorAll("[data-drive-action]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const target = e.currentTarget;
+      await handleDriveAction(target.dataset.id, target.dataset.driveAction, true);
     });
   });
 
@@ -205,6 +216,12 @@ function openDetail(aulaId) {
     btn.addEventListener("click", async (e) => {
       const target = e.currentTarget;
       await runAction(aula.id, target.dataset.action);
+    });
+  }
+  for (const btn of detailContentEl.querySelectorAll("[data-drive-action]")) {
+    btn.addEventListener("click", async (e) => {
+      const target = e.currentTarget;
+      await handleDriveAction(aula.id, target.dataset.driveAction, false);
     });
   }
 }
@@ -257,6 +274,16 @@ function buildDetailHtml(aula) {
     </section>
 
     <section>
+      <h3>Drive</h3>
+      <p><strong>Drive folder ID:</strong> ${escapeHtml(aula.drive_folder_id || "não vinculado")}</p>
+      <div class="actions-wrap">
+        <button class="btn secondary" data-drive-action="list-files">Listar arquivos Drive</button>
+        <button class="btn secondary" data-drive-action="upload-file">Upload para Drive</button>
+      </div>
+      ${renderDriveFilesSection(aula.id)}
+    </section>
+
+    <section>
       <h3>Ações</h3>
       <div class="actions-wrap">${actions}</div>
     </section>
@@ -282,6 +309,138 @@ async function runAction(aulaId, route) {
   } catch (err) {
     showToast(`Erro: ${err.message}`, true);
   }
+}
+
+async function runDriveBootstrap() {
+  driveBootstrapBtn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/api/drive/bootstrap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) {
+      throw new Error(payload.message || payload.detail || "Falha no bootstrap do Drive");
+    }
+    const summary = payload.summary || {};
+    showToast(
+      `Drive bootstrap OK: módulos ${summary.modules_touched ?? 0}, aulas ${summary.aulas_touched ?? 0}.`
+    );
+    await loadAll(false);
+  } catch (err) {
+    showToast(`Erro Drive bootstrap: ${err.message}`, true);
+  } finally {
+    driveBootstrapBtn.disabled = false;
+  }
+}
+
+async function handleDriveAction(aulaId, driveAction, fromCard = false) {
+  if (driveAction === "list-files") {
+    await listDriveFilesForAula(aulaId, fromCard);
+    return;
+  }
+  if (driveAction === "upload-file") {
+    await uploadFileForAula(aulaId, fromCard);
+    return;
+  }
+}
+
+async function listDriveFilesForAula(aulaId, forceOpenDetail = false) {
+  if (forceOpenDetail && selectedAulaId !== aulaId) {
+    openDetail(aulaId);
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/drive-files`);
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) {
+      throw new Error(payload.message || payload.detail || "Falha ao listar arquivos no Drive");
+    }
+
+    driveFilesCache.set(aulaId, payload.files || []);
+    showToast(`Drive: ${payload.count ?? (payload.files || []).length} arquivo(s) para ${aulaId}.`);
+
+    if (selectedAulaId === aulaId) {
+      openDetail(aulaId);
+    }
+  } catch (err) {
+    showToast(`Erro listagem Drive: ${err.message}`, true);
+  }
+}
+
+async function uploadFileForAula(aulaId, forceOpenDetail = false) {
+  const aula = state?.aulas?.find((item) => item.id === aulaId);
+  if (!aula) {
+    showToast("Aula não encontrada no estado atual.", true);
+    return;
+  }
+  if (forceOpenDetail && selectedAulaId !== aulaId) {
+    openDetail(aulaId);
+  }
+
+  const defaultPath = `${aula.pasta_relativa}/${aula.id}.pptx`;
+  const localRelativePath = window.prompt(
+    "Caminho relativo ao repositório para upload no Drive:",
+    defaultPath
+  );
+  if (localRelativePath === null) return;
+
+  const targetSubfolder = window.prompt(
+    "Subpasta destino no Drive (opcional): 01_bibliografia, 02_livros_extraidos, 03_pdfs_artigos. Deixe vazio para raiz da aula.",
+    ""
+  );
+  if (targetSubfolder === null) return;
+
+  const targetName = window.prompt(
+    "Nome final do arquivo no Drive (opcional). Deixe vazio para usar o nome local.",
+    ""
+  );
+  if (targetName === null) return;
+
+  const payload = {
+    local_relative_path: localRelativePath.trim(),
+    target_subfolder: targetSubfolder.trim() || null,
+    target_name: targetName.trim() || null,
+  };
+  if (!payload.local_relative_path) {
+    showToast("Upload cancelado: caminho do arquivo vazio.", true);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.message || data.detail || "Falha no upload para Drive");
+    }
+    const uploadedName = data.file?.name || "arquivo";
+    showToast(`Upload concluído (${aulaId}): ${uploadedName}`);
+    await listDriveFilesForAula(aulaId, false);
+  } catch (err) {
+    showToast(`Erro upload Drive: ${err.message}`, true);
+  }
+}
+
+function renderDriveFilesSection(aulaId) {
+  if (!driveFilesCache.has(aulaId)) {
+    return "<p>Sem listagem carregada. Clique em \"Listar arquivos Drive\".</p>";
+  }
+  const files = driveFilesCache.get(aulaId) || [];
+  if (!files.length) {
+    return "<p>Sem arquivos encontrados para esta aula no Drive.</p>";
+  }
+
+  const items = files
+    .map((f) => {
+      const parentLabel = f.parentLabel ? ` (${escapeHtml(f.parentLabel)})` : "";
+      return `<li>${escapeHtml(f.name)}${parentLabel}</li>`;
+    })
+    .join("");
+
+  return `<ul class="drive-files-list">${items}</ul>`;
 }
 
 function escapeHtml(value) {

@@ -181,6 +181,7 @@ h1 {
 
 .card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -295,6 +296,13 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.drive-files-list {
+  margin: 8px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding-left: 18px;
 }
 
 .preview {

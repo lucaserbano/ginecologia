@@ -57,6 +57,25 @@ python3 -m uvicorn server:app --reload --host 127.0.0.1 --port 8787
 - `GET /api/aulas/{id}/drive-files`
 - `POST /api/aulas/{id}/upload`
 
+## Limpeza de pastas duplicadas no Drive
+Script: `backend/drive_delete_duplicate_folders.py`
+
+1. Dry-run seguro (não apaga nada):
+```bash
+cd aula-pipeline/backend
+python3 drive_delete_duplicate_folders.py --strategy protected
+```
+
+2. Aplicar limpeza real (move duplicadas para lixeira):
+```bash
+cd aula-pipeline/backend
+python3 drive_delete_duplicate_folders.py --strategy protected --apply
+```
+
+3. Estratégias opcionais:
+- `--strategy newest`: mantém pasta mais recente de cada grupo duplicado.
+- `--strategy oldest`: mantém pasta mais antiga de cada grupo duplicado.
+
 ## Configuração Google Drive (OAuth de usuário)
 1. Copie `aula-pipeline/.env.example` para `aula-pipeline/.env`.
 2. Ajuste os caminhos no `.env` conforme sua máquina.
