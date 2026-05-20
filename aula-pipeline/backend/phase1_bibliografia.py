@@ -478,10 +478,11 @@ Regras:
             sys_prompt,
             user_prompt,
             temperature=0.0,
-            max_tokens=1200,
+            max_tokens=2000,
             response_schema=INTERNATIONAL_GUIDELINES_SCHEMA,
         )
-    except Exception:
+    except Exception as exc:
+        print(f"[fase1/diretrizes] Gemini falhou: {exc}", flush=True)
         return []
 
     try:
@@ -490,6 +491,7 @@ Regras:
         data = _extract_json(raw) or {}
 
     raw_items = data.get("guidelines") or []
+    print(f"[fase1/diretrizes] Gemini sugeriu {len(raw_items)} candidatos", flush=True)
     allowed_domains = [d for _, d in GUIDELINE_SOURCES_EN]
     validated: list[dict] = []
     for item in raw_items:
@@ -497,13 +499,18 @@ Regras:
         source = (item.get("source") or "").strip()
         title = (item.get("title") or "").strip()
         if not url or not source or not title:
+            print(f"[fase1/diretrizes] item incompleto: src={source} url={url}", flush=True)
             continue
         parsed = urllib.parse.urlparse(url)
         if not any(parsed.netloc.endswith(d) for d in allowed_domains):
+            print(f"[fase1/diretrizes] dominio rejeitado: {url}", flush=True)
             continue
-        if not _validate_url(url):
+        ok = _validate_url(url)
+        print(f"[fase1/diretrizes] validacao {source}: {'OK' if ok else 'FAIL'} {url}", flush=True)
+        if not ok:
             continue
         validated.append({"source": source, "title": title, "url": url})
+    print(f"[fase1/diretrizes] {len(validated)} URLs validadas", flush=True)
     return validated
 
 
