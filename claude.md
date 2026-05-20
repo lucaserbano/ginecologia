@@ -33,6 +33,11 @@ No Google Drive a estrutura espelha esse layout por subpastas (`01_bibliografia`
 
 ## Pipeline (fases)
 1. **Fase 1 - Bibliografia**: ler `aulas/temas.md`, selecionar modulo/aula, acionar `gerar-bibliografia` -> gera `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md`, `01_bibliografia.md` e extrai capitulos de livros para `02_livros_extraidos` quando ha PDF no Drive.
+   - Queries sao geradas por Gemini (`_generate_search_terms` em `phase1_bibliografia.py`): tema PT -> EN, query PubMed com MeSH, termos EN para UpToDate/ACOG/RCOG/FIGO/WHO/NAMS/ESHRE e termos PT para FEBRASGO/MS-CONITEC.
+   - PubMed: filtro `humans + 2019-3000 + (review|meta-analysis|RCT|practice guideline)`, com fallback sem filtro de tipo se < 3 resultados. Limite 5.
+   - UpToDate: limite 3, so links `/contents/`.
+   - Diretrizes: limite 6, PDFs sobem no ranking (`_rank_guideline_links`).
+   - Output e em **lista markdown clicavel**, sem tabelas nem placeholders vazios.
 2. **Fase 2 - Texto**: aguardar PDFs em `03_pdfs_artigos/`, acionar `gerar-texto` -> gera `04_aula_texto.md` (le bibliografia do Drive como fonte primaria).
 3. **Fase 3 - Revisao**: acionar `enviar-revisao` -> gera `06_revisao.md` (le texto do Drive como fonte primaria).
 4. **Fase 4 - Slides**: acionar `gerar-pptx` 2x. 1a execucao gera `05_outline_slides.md` e move para `slides_em_producao`. 2a execucao marca `pptx_pronto`. Montagem PPTX real ainda nao implementada.

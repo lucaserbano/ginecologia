@@ -10,32 +10,41 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from artifact_store import ArtifactWriteResult, format_artifact_result, persist_ai_artifact
 from drive_client import build_drive, download_file_to_path, list_children
 from drive_sync import upload_local_file_for_aula
+from openrouter_client import generate_text
 from schemas import AulaItem
 from settings import (
     BOOKS_DRIVE_FOLDER_ID,
     NCBI_API_KEY,
     NCBI_EMAIL,
     NCBI_TOOL,
-    PHASE1_MAX_WEB_RESULTS,
 )
 from store import REPO_ROOT
 
 
-GUIDELINE_SOURCES = [
+GUIDELINE_SOURCES_PT = [
     ("FEBRASGO", "febrasgo.org.br"),
     ("Ministério da Saúde / CONITEC", "www.gov.br"),
-    ("WHO", "who.int"),
+]
+
+GUIDELINE_SOURCES_EN = [
     ("ACOG", "acog.org"),
     ("RCOG", "rcog.org.uk"),
     ("FIGO", "figo.org"),
+    ("WHO", "who.int"),
+    ("NAMS", "menopause.org"),
+    ("ESHRE", "eshre.eu"),
 ]
+
+PUBMED_LIMIT = 5
+UPTODATE_LIMIT = 3
+GUIDELINES_LIMIT = 6
 
 BOOK_TARGETS = [
     {
@@ -52,6 +61,16 @@ BOOK_TARGETS = [
 
 
 @dataclass
+class SearchTerms:
+    tema_en: str
+    pubmed_query: str
+    uptodate_query: str
+    guideline_terms_en: str
+    guideline_terms_pt: str
+    source: str = "gemini"
+
+
+@dataclass
 class Phase1Result:
     artifacts: list[ArtifactWriteResult] = field(default_factory=list)
     uploaded_books: list[dict] = field(default_factory=list)
@@ -60,15 +79,17 @@ class Phase1Result:
 
 def run_phase1_bibliografia(aula: AulaItem, note: Optional[str]) -> Phase1Result:
     result = Phase1Result()
-    generated_at = datetime.utcnow().strftime("%Y-%m-%d")
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    pubmed_md = build_pubmed_markdown(aula, generated_at)
+    terms = _generate_search_terms(aula, result.warnings)
+
+    pubmed_md, pubmed_links = build_pubmed_markdown(aula, generated_at, terms)
     result.artifacts.append(persist_ai_artifact(aula, "pubmed_busca.md", pubmed_md))
 
-    uptodate_md = build_uptodate_markdown(aula, generated_at)
+    uptodate_md, uptodate_links = build_uptodate_markdown(aula, generated_at, terms)
     result.artifacts.append(persist_ai_artifact(aula, "uptodate.md", uptodate_md))
 
-    diretrizes_md = build_guidelines_markdown(aula, generated_at)
+    diretrizes_md, guideline_links = build_guidelines_markdown(aula, generated_at, terms)
     result.artifacts.append(persist_ai_artifact(aula, "diretrizes_consensos.md", diretrizes_md))
 
     capitulos_md, uploaded_books, book_warnings = build_book_artifacts(aula, generated_at)
@@ -79,9 +100,10 @@ def run_phase1_bibliografia(aula: AulaItem, note: Optional[str]) -> Phase1Result
     consolidated = build_consolidated_markdown(
         aula=aula,
         generated_at=generated_at,
-        pubmed_md=pubmed_md,
-        uptodate_md=uptodate_md,
-        diretrizes_md=diretrizes_md,
+        terms=terms,
+        pubmed_links=pubmed_links,
+        uptodate_links=uptodate_links,
+        guideline_links=guideline_links,
         capitulos_md=capitulos_md,
         note=note,
     )
@@ -92,7 +114,7 @@ def run_phase1_bibliografia(aula: AulaItem, note: Optional[str]) -> Phase1Result
 def format_phase1_result(result: Phase1Result) -> str:
     artifact_bits = [format_artifact_result(item) for item in result.artifacts]
     uploaded = len(result.uploaded_books)
-    warnings = []
+    warnings: list[str] = []
     warnings.extend(result.warnings)
     for item in result.artifacts:
         warnings.extend(item.warnings)
@@ -105,142 +127,263 @@ def format_phase1_result(result: Phase1Result) -> str:
     return message
 
 
-def build_pubmed_markdown(aula: AulaItem, generated_at: str) -> str:
-    query = build_pubmed_query(aula)
-    rows: list[dict] = []
-    error = ""
+# ---------------------------------------------------------------------------
+# Geração de queries (Gemini)
+# ---------------------------------------------------------------------------
+
+
+def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
+    fallback = _fallback_terms(aula)
+    sys_prompt = (
+        "Você é um curador de bibliografia médica. Para uma aula de ginecologia em português, "
+        "gere termos de busca rastreáveis em inglês para PubMed/UpToDate/diretrizes internacionais "
+        "e em português para FEBRASGO/Ministério da Saúde. Nunca invente termos sem relação clínica."
+    )
+    user_prompt = f"""Aula: M{aula.modulo_num} - {aula.modulo_nome} / Aula {aula.aula_num} - {aula.aula_tema}
+
+Responda APENAS com JSON válido (sem markdown, sem ```), no formato:
+{{
+  "tema_en": "tradução curta e clínica do tema em inglês (1 linha)",
+  "pubmed_query": "string PubMed em inglês usando MeSH e operadores booleanos (sem filtros de tipo ou data; eu adiciono depois)",
+  "uptodate_query": "termos curtos em inglês para buscar página /contents/ do UpToDate (sem operadores)",
+  "guideline_terms_en": "termos em inglês para buscar diretrizes/guidelines em sites internacionais (ACOG, RCOG, FIGO, WHO, NAMS, ESHRE)",
+  "guideline_terms_pt": "termos em português para buscar diretrizes nacionais (FEBRASGO, Ministério da Saúde)"
+}}
+
+Exemplo (tema: 'Sindrome dos ovarios policisticos'):
+{{
+  "tema_en": "Polycystic ovary syndrome",
+  "pubmed_query": "(\\"polycystic ovary syndrome\\"[MeSH Terms] OR \\"PCOS\\"[Title/Abstract]) AND (diagnosis OR treatment OR management)",
+  "uptodate_query": "polycystic ovary syndrome diagnosis treatment",
+  "guideline_terms_en": "polycystic ovary syndrome PCOS guideline",
+  "guideline_terms_pt": "sindrome dos ovarios policisticos SOP"
+}}"""
     try:
-        ids = pubmed_esearch(query, retmax=8)
+        raw = generate_text(sys_prompt, user_prompt, temperature=0.1, max_tokens=600)
+    except Exception as exc:
+        warnings.append(f"Gemini indisponível para queries da fase 1: {exc}")
+        return fallback
+
+    data = _extract_json(raw)
+    if not data:
+        warnings.append("Gemini retornou JSON inválido para queries da fase 1.")
+        return fallback
+
+    return SearchTerms(
+        tema_en=_clean_text(data.get("tema_en")) or fallback.tema_en,
+        pubmed_query=_clean_text(data.get("pubmed_query")) or fallback.pubmed_query,
+        uptodate_query=_clean_text(data.get("uptodate_query")) or fallback.uptodate_query,
+        guideline_terms_en=_clean_text(data.get("guideline_terms_en")) or fallback.guideline_terms_en,
+        guideline_terms_pt=_clean_text(data.get("guideline_terms_pt")) or fallback.guideline_terms_pt,
+        source="gemini",
+    )
+
+
+def _fallback_terms(aula: AulaItem) -> SearchTerms:
+    tema = aula.aula_tema or ""
+    return SearchTerms(
+        tema_en=tema,
+        pubmed_query=f'("{tema}"[Title/Abstract]) AND (gynecology OR women OR female)',
+        uptodate_query=f"{tema} gynecology",
+        guideline_terms_en=f"{tema} gynecology guideline",
+        guideline_terms_pt=f"{tema} ginecologia",
+        source="fallback",
+    )
+
+
+def _extract_json(raw: str) -> Optional[dict]:
+    if not raw:
+        return None
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# PubMed
+# ---------------------------------------------------------------------------
+
+
+def build_pubmed_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
+    base_query = terms.pubmed_query
+    filters = (
+        ' AND humans[Filter] AND ("2019"[PDAT]:"3000"[PDAT]) AND '
+        '(review[pt] OR meta-analysis[pt] OR randomized controlled trial[pt] OR practice guideline[pt])'
+    )
+    rows: list[dict] = []
+    used_query = base_query + filters
+    error = ""
+
+    try:
+        ids = pubmed_esearch(used_query, retmax=PUBMED_LIMIT * 2)
+        if len(ids) < 3:
+            # Fallback sem filtro de tipo
+            used_query = base_query + ' AND humans[Filter] AND ("2019"[PDAT]:"3000"[PDAT])'
+            ids = pubmed_esearch(used_query, retmax=PUBMED_LIMIT * 2)
         time.sleep(0.35)
-        rows = pubmed_esummary(ids)
+        rows = pubmed_esummary(ids[: PUBMED_LIMIT * 2])
     except Exception as exc:
         error = str(exc)
 
-    if rows:
-        table_rows = "\n".join(
-            "| {priority} | {title} | {year} | {pmid} | https://pubmed.ncbi.nlm.nih.gov/{pmid}/ | {journal} | {reason} |".format(
-                priority="Alta" if idx < 3 else "Média",
-                title=_escape_table(row.get("title", "")),
-                year=_escape_table(row.get("year", "")),
-                pmid=_escape_table(row.get("pmid", "")),
-                journal=_escape_table(row.get("journal", "")),
-                reason=_escape_table("Resultado PubMed priorizado pela consulta específica da aula."),
-            )
-            for idx, row in enumerate(rows)
-        )
+    rows = rows[:PUBMED_LIMIT]
+    links = [
+        {
+            "title": row.get("title", ""),
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{row.get('pmid')}/",
+            "year": row.get("year", ""),
+            "journal": row.get("journal", ""),
+            "ptype": row.get("ptype", ""),
+            "pmid": row.get("pmid", ""),
+        }
+        for row in rows
+        if row.get("pmid")
+    ]
+
+    if links:
+        items = "\n".join(_format_pubmed_line(link) for link in links)
     else:
-        table_rows = "| - | - | - | - | - | - | - |"
+        items = "- (nenhum resultado retornado pela busca automática — refinar query manualmente)"
 
-    return f"""# Busca PubMed - M{aula.modulo_num} / Aula {aula.aula_num}
+    error_line = f"\n\n> Erro técnico na busca: {error}" if error else ""
 
-## 1) Metadados da busca
-- Data da busca: {generated_at}
-- Tema: {aula.aula_tema}
-- População: ginecologia
-- Recorte clínico: diagnóstico, tratamento, seguimento e tomada de decisão
-- Idiomas: português, inglês, espanhol
-- Período: últimos 10 anos + revisões relevantes
+    md = f"""# PubMed — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
 
-## 2) Estratégia de busca
-### String específica
-`{query}`
+**Tema (EN):** {terms.tema_en}
+**Data:** {generated_at}
+**Query:** `{used_query}`
+**Fonte das queries:** {terms.source}
 
-## 3) Filtros aplicados
-- Base: PubMed via NCBI E-utilities
-- Quantidade máxima: 8 resultados
-- Observação: sem uso de API paga; `NCBI_API_KEY` é opcional e apenas aumenta limite de requisições.
+## Artigos selecionados ({len(links)})
+{items}
 
-## 4) Artigos selecionados (shortlist)
-| Prioridade | Título | Ano | PMID | Link PubMed | Periódico | Motivo da seleção |
-|---|---|---:|---|---|---|---|
-{table_rows}
-
-## 5) Artigos excluídos relevantes
-| Título | Motivo da exclusão |
-|---|---|
-| - | Triagem humana pendente após leitura de título/resumo. |
-
-## 6) Lacunas de evidência
-- Validar manualmente aderência clínica e qualidade metodológica antes de usar no texto final.
-{f"- Erro técnico na busca: {error}" if error else ""}
+## Lacunas
+- Validar aderência clínica e qualidade metodológica antes de citar no texto.
+- Se quiser ampliar a busca, remover o filtro de tipo de estudo ou expandir a janela temporal.{error_line}
 """
+    return md, links
 
 
-def build_uptodate_markdown(aula: AulaItem, generated_at: str) -> str:
-    query = f"site:uptodate.com/contents {aula.aula_tema} gynecology"
-    links = public_search(query, allowed=lambda url: _is_uptodate_content(url), limit=3)
-    rows = _links_table(links)
-    return f"""# UpToDate - M{aula.modulo_num} / Aula {aula.aula_num}
+def _format_pubmed_line(link: dict) -> str:
+    meta_bits = []
+    if link.get("year"):
+        meta_bits.append(link["year"])
+    if link.get("journal"):
+        meta_bits.append(link["journal"])
+    if link.get("ptype"):
+        meta_bits.append(link["ptype"])
+    meta = " · ".join(meta_bits)
+    title = link.get("title") or "(sem título)"
+    suffix = f" — {meta}" if meta else ""
+    return f"- [{title}]({link['url']}){suffix}"
 
-## Metadados
-- Data: {generated_at}
-- Aula: {aula.id} - {aula.aula_tema}
-- População: ginecologia
-- Contexto: apoio bibliográfico, sem baixar conteúdo protegido
 
-## Links selecionados (validados)
-| Prioridade | Título | Link | Motivo da seleção | Observação |
-|---|---|---|---|---|
-{rows}
+# ---------------------------------------------------------------------------
+# UpToDate
+# ---------------------------------------------------------------------------
 
-## Queries usadas
-- Query principal: `{query}`
 
-## Auditoria
-- Total de links candidatos: {len(links)}
-- Pendências/lacunas: validar aderência clínica e acesso institucional antes de usar conteúdo.
+def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
+    query = f"site:uptodate.com/contents {terms.uptodate_query}"
+    links = public_search(query, allowed=lambda url: _is_uptodate_content(url), limit=UPTODATE_LIMIT)
+
+    if links:
+        items = "\n".join(f"- [{link['title']}]({link['url']})" for link in links)
+    else:
+        items = "- (nenhum link `/contents/` encontrado — refinar termos manualmente)"
+
+    md = f"""# UpToDate — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
+
+**Data:** {generated_at}
+**Termos:** `{terms.uptodate_query}`
+
+## Links selecionados ({len(links)})
+{items}
+
+## Observações
+- Apenas links com prefixo `https://www.uptodate.com/contents/` são aceitos.
+- Acesso institucional necessário para conteúdo completo.
 """
+    return md, links
 
 
-def build_guidelines_markdown(aula: AulaItem, generated_at: str) -> str:
+# ---------------------------------------------------------------------------
+# Diretrizes / Consensos
+# ---------------------------------------------------------------------------
+
+
+def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
     found: list[dict] = []
-    for source_name, domain in GUIDELINE_SOURCES:
-        query = f"site:{domain} {aula.aula_tema} gynecology guideline consensus"
-        links = public_search(query, allowed=lambda url, d=domain: d in urllib.parse.urlparse(url).netloc, limit=2)
-        for link in links:
-            found.append({**link, "source": source_name, "query": query})
-        if len(found) >= PHASE1_MAX_WEB_RESULTS:
-            break
+
+    def _scan(sources, search_terms: str, lang: str):
+        for source_name, domain in sources:
+            if len(found) >= GUIDELINES_LIMIT:
+                return
+            query = f"site:{domain} {search_terms}"
+            links = public_search(
+                query,
+                allowed=lambda url, d=domain: d in urllib.parse.urlparse(url).netloc,
+                limit=3,
+            )
+            for link in _rank_guideline_links(links):
+                if len(found) >= GUIDELINES_LIMIT:
+                    return
+                if any(existing["url"] == link["url"] for existing in found):
+                    continue
+                found.append({**link, "source": source_name, "lang": lang})
+
+    _scan(GUIDELINE_SOURCES_PT, terms.guideline_terms_pt, "pt")
+    _scan(GUIDELINE_SOURCES_EN, terms.guideline_terms_en, "en")
 
     if found:
-        rows = "\n".join(
-            "| {priority} | Guideline/consenso candidato | {title} | {source} | - | internacional/nacional | {url} | Fonte priorizada para triagem humana. |".format(
-                priority="Essencial" if idx < 4 else "Complementar",
-                title=_escape_table(item["title"]),
-                source=_escape_table(item["source"]),
-                url=_escape_table(item["url"]),
-            )
-            for idx, item in enumerate(found[:PHASE1_MAX_WEB_RESULTS])
+        items = "\n".join(
+            f"- **{link['source']}** — [{link['title']}]({link['url']})"
+            + (" · PDF" if link.get("is_pdf") else "")
+            for link in found[:GUIDELINES_LIMIT]
         )
     else:
-        rows = "| - | - | - | - | - | - | - | Nenhum candidato recuperado automaticamente. |"
+        items = "- (nenhum candidato encontrado nas fontes oficiais — refinar termos manualmente)"
 
-    return f"""# Diretrizes e Consensos - M{aula.modulo_num} / Aula {aula.aula_num}
+    md = f"""# Diretrizes e Consensos — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
 
-## 1) Metadados
-- Data da curadoria: {generated_at}
-- Tema: {aula.aula_tema}
-- População: ginecologia
-- Escopo clínico: documentos oficiais e consensos priorizados
+**Data:** {generated_at}
+**Termos (PT):** `{terms.guideline_terms_pt}`
+**Termos (EN):** `{terms.guideline_terms_en}`
 
-## 2) Fontes selecionadas
-| Prioridade | Tipo | Título | Entidade | Ano | País/escopo | Link | Motivo da seleção |
-|---|---|---|---|---:|---|---|---|
-{rows}
+## Fontes selecionadas ({len(found)})
+{items}
 
-## 3) Principais recomendações para a aula
-| Fonte | Recomendação-chave | Nível de evidência (se houver) | Impacto prático no manejo |
-|---|---|---|---|
-| - | Extração de recomendações depende da leitura humana do documento candidato. | - | - |
+## Fontes consultadas
+- Nacionais: {", ".join(name for name, _ in GUIDELINE_SOURCES_PT)}
+- Internacionais: {", ".join(name for name, _ in GUIDELINE_SOURCES_EN)}
 
-## 4) Conflitos entre diretrizes
-| Tema do conflito | Fonte A | Fonte B | Diferença prática | Como abordar na aula |
-|---|---|---|---|---|
-| - | - | - | - | Pendente após leitura. |
-
-## 5) Lacunas
-- Esta etapa reúne links oficiais candidatos; validação de conteúdo e ano deve ser feita antes da redação final.
+## Observações
+- PDFs oficiais aparecem com marca `· PDF`.
+- Sem extrair recomendações automaticamente — leitura humana obrigatória antes do texto.
 """
+    return md, found[:GUIDELINES_LIMIT]
+
+
+def _rank_guideline_links(links: list[dict]) -> list[dict]:
+    annotated = []
+    for link in links:
+        url = link["url"]
+        is_pdf = url.lower().endswith(".pdf") or ".pdf?" in url.lower()
+        annotated.append({**link, "is_pdf": is_pdf})
+    annotated.sort(key=lambda x: (0 if x["is_pdf"] else 1, len(x["url"])))
+    return annotated
+
+
+# ---------------------------------------------------------------------------
+# Livros (mantido — está funcionando bem)
+# ---------------------------------------------------------------------------
 
 
 def build_book_artifacts(aula: AulaItem, generated_at: str) -> tuple[str, list[dict], list[str]]:
@@ -263,97 +406,106 @@ def build_book_artifacts(aula: AulaItem, generated_at: str) -> tuple[str, list[d
             item = available.get(drive_name)
             index_path = REPO_ROOT / book["index"]
             if not item:
-                rows.append(f"| {title} | {aula.aula_tema} | - | - | 0 | - | PDF não encontrado no Drive ({drive_name}). |")
+                rows.append(f"- **{title}**: PDF não encontrado no Drive (`{drive_name}`).")
                 continue
             if not extractor or not index_path.exists():
-                rows.append(f"| {title} | {aula.aula_tema} | - | - | 0 | - | Script ou sumário indisponível no backend. |")
+                rows.append(f"- **{title}**: script ou sumário indisponível no backend.")
                 continue
 
             try:
                 source_pdf = tmp_dir / drive_name
                 download_file_to_path(service, item["id"], source_pdf)
+                output_path = tmp_dir / f"{title}_{_safe_slug(aula.id + '_' + aula.aula_tema)}.pdf"
                 selected, confidence, pages = _extract_book_pages(
                     extractor=extractor,
                     book_title=title,
                     source_pdf=source_pdf,
                     index_path=index_path,
-                    output_path=tmp_dir / f"{title}_{_safe_slug(aula.id + '_' + aula.aula_tema)}.pdf",
+                    output_path=output_path,
                     query=aula.aula_tema,
                 )
                 uploaded_file = upload_local_file_for_aula(
                     aula=aula,
                     drive_service=service,
-                    local_path=tmp_dir / f"{title}_{_safe_slug(aula.id + '_' + aula.aula_tema)}.pdf",
+                    local_path=output_path,
                     target_subfolder="02_livros_extraidos",
                 )
                 uploaded.append(uploaded_file)
+                view_link = uploaded_file.get("webViewLink")
+                file_name = uploaded_file.get("name") or output_path.name
+                file_link = f"[{file_name}]({view_link})" if view_link else file_name
                 rows.append(
-                    f"| {title} | {aula.aula_tema} | {_escape_table(selected.title)} | {selected.start}-{selected.end} | {confidence:.2f} | {uploaded_file.get('name')} | {pages} página(s) extraídas e enviadas ao Drive. |"
+                    f"- **{title}** — capítulo: {selected.title} (p. {selected.start}-{selected.end}) · "
+                    f"confiança {confidence:.2f} · {pages} pág. extraídas → {file_link}"
                 )
             except Exception as exc:
                 warnings.append(f"falha ao extrair {title}: {exc}")
-                rows.append(f"| {title} | {aula.aula_tema} | - | - | 0 | - | Erro técnico: {_escape_table(str(exc))}. |")
+                rows.append(f"- **{title}**: erro técnico — {exc}")
 
-    table = "\n".join(rows) if rows else "| - | - | - | - | - | - | Nenhum livro processado. |"
-    return f"""# Capítulos de livros - M{aula.modulo_num} / Aula {aula.aula_num}
+    table = "\n".join(rows) if rows else "- (nenhum livro processado)"
+    md = f"""# Capítulos de livros — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
 
-## Metadados
-- Data da indexação: {generated_at}
-- Tema: {aula.aula_tema}
-- Pasta Drive dos livros: {BOOKS_DRIVE_FOLDER_ID}
+**Data:** {generated_at}
+**Pasta Drive dos livros:** `{BOOKS_DRIVE_FOLDER_ID}`
 
 ## Extrações
-| Livro | Tema solicitado | Capítulo selecionado | Páginas | Confiança | Arquivo gerado | Motivo/observação |
-|---|---|---|---|---:|---|---|
 {table}
 
 ## Pendências
 {_warnings_list(warnings)}
-""", uploaded, warnings
+"""
+    return md, uploaded, warnings
+
+
+# ---------------------------------------------------------------------------
+# Consolidação
+# ---------------------------------------------------------------------------
 
 
 def build_consolidated_markdown(
     aula: AulaItem,
     generated_at: str,
-    pubmed_md: str,
-    uptodate_md: str,
-    diretrizes_md: str,
+    terms: SearchTerms,
+    pubmed_links: list[dict],
+    uptodate_links: list[dict],
+    guideline_links: list[dict],
     capitulos_md: str,
     note: Optional[str],
 ) -> str:
-    return f"""# Bibliografia Inicial - {aula.id}
+    pubmed_block = "\n".join(_format_pubmed_line(link) for link in pubmed_links) or "- (sem resultados)"
+    uptodate_block = "\n".join(f"- [{link['title']}]({link['url']})" for link in uptodate_links) or "- (sem resultados)"
+    guideline_block = "\n".join(
+        f"- **{link['source']}** — [{link['title']}]({link['url']})"
+        + (" · PDF" if link.get("is_pdf") else "")
+        for link in guideline_links
+    ) or "- (sem resultados)"
 
-## Metadados
-- Data: {generated_at}
-- Módulo: M{aula.modulo_num} - {aula.modulo_nome}
-- Aula: {aula.aula_num} - {aula.aula_tema}
-- Observação do usuário: {note or "nenhuma"}
+    return f"""# Bibliografia — {aula.id} · {aula.aula_tema}
 
-## Arquivos gerados nesta fase
-- `pubmed_busca.md`
-- `uptodate.md`
-- `diretrizes_consensos.md`
-- `capitulos_livros.md`
+**Módulo:** M{aula.modulo_num} - {aula.modulo_nome}
+**Aula:** {aula.aula_num} - {aula.aula_tema}
+**Data:** {generated_at}
+**Tema (EN):** {terms.tema_en}
+**Observação do usuário:** {note or "nenhuma"}
 
-## Resumo operacional
-Esta fase reuniu candidatos bibliográficos rastreáveis e extraiu capítulos de livros quando os PDFs estavam disponíveis no Drive. Nenhuma fonte deve ser considerada aprovada sem triagem humana.
+## Diretrizes e Consensos
+{guideline_block}
 
----
+## PubMed
+{pubmed_block}
 
-{diretrizes_md}
-
----
-
-{pubmed_md}
-
----
-
-{uptodate_md}
+## UpToDate
+{uptodate_block}
 
 ---
 
 {capitulos_md}
 """
+
+
+# ---------------------------------------------------------------------------
+# Helpers de busca
+# ---------------------------------------------------------------------------
 
 
 def pubmed_esearch(query: str, retmax: int) -> list[str]:
@@ -393,18 +545,37 @@ def pubmed_esummary(ids: list[str]) -> list[dict]:
         item = result.get(pmid, {})
         pubdate = str(item.get("pubdate", ""))
         year = re.search(r"\d{4}", pubdate)
+        pubtypes = item.get("pubtype") or []
         rows.append(
             {
                 "pmid": pmid,
                 "title": _clean_text(item.get("title", "")),
                 "year": year.group(0) if year else "",
                 "journal": _clean_text(item.get("fulljournalname") or item.get("source", "")),
+                "ptype": _summarize_pubtype(pubtypes),
             }
         )
     return rows
 
 
-def public_search(query: str, allowed, limit: int) -> list[dict]:
+def _summarize_pubtype(pubtypes: list[str]) -> str:
+    priority = [
+        "Practice Guideline",
+        "Guideline",
+        "Meta-Analysis",
+        "Systematic Review",
+        "Review",
+        "Randomized Controlled Trial",
+        "Clinical Trial",
+    ]
+    found = [p for p in pubtypes if isinstance(p, str)]
+    for label in priority:
+        if any(label.lower() == p.lower() for p in found):
+            return label
+    return found[0] if found else ""
+
+
+def public_search(query: str, allowed: Callable[[str], bool], limit: int) -> list[dict]:
     url = "https://lite.duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": query})
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
@@ -426,11 +597,6 @@ def public_search(query: str, allowed, limit: int) -> list[dict]:
         if len(results) >= limit:
             break
     return results
-
-
-def build_pubmed_query(aula: AulaItem) -> str:
-    theme = aula.aula_tema
-    return f'("{theme}"[Title/Abstract] OR "{theme}"[MeSH Terms]) AND (gynecology OR women OR female)'
 
 
 def _fetch_json(base_url: str, params: dict[str, str]) -> dict:
@@ -457,15 +623,6 @@ def _resolve_search_href(href: str) -> str:
 def _is_uptodate_content(url: str) -> bool:
     parsed = urllib.parse.urlparse(url)
     return parsed.netloc == "www.uptodate.com" and parsed.path.startswith("/contents/")
-
-
-def _links_table(links: list[dict]) -> str:
-    if not links:
-        return "| - | - | - | Nenhum link candidato recuperado automaticamente. | - |"
-    return "\n".join(
-        f"| {'Alta' if idx == 0 else 'Média'} | {_escape_table(item['title'])} | {_escape_table(item['url'])} | Candidato recuperado por busca pública filtrada. | Validar aderência antes de uso. |"
-        for idx, item in enumerate(links)
-    )
 
 
 def _load_book_extractor(warnings: list[str]):
@@ -498,11 +655,9 @@ def _safe_slug(text: str) -> str:
     return text or "aula"
 
 
-def _escape_table(value: str) -> str:
-    return _clean_text(value).replace("|", "\\|")
-
-
-def _clean_text(value: str) -> str:
+def _clean_text(value) -> str:
+    if value is None:
+        return ""
     value = re.sub(r"<[^>]+>", "", str(value or ""))
     value = html.unescape(value)
     return re.sub(r"\s+", " ", value).strip()

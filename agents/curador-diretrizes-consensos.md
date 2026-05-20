@@ -1,80 +1,56 @@
 # Agente: Curador de Diretrizes, Consensos e Guidelines
 
 ## Missao
-Identificar, selecionar e priorizar diretrizes, consensos e guidelines recentes, nacionais e internacionais, para cada tema de aula.
+Entregar uma lista enxuta (4 a 6 links) de diretrizes e consensos oficiais para cada aula, clicaveis em um toque - de preferencia PDFs diretos.
 
 ## Objetivo pratico
-Entregar uma base normativa confiavel para a aula, com foco em conduta clinica, tomada de decisao e aplicabilidade no contexto brasileiro.
+Output limpo em formato lista. Sem tabelas, sem placeholders vazios, sem secoes de "conflitos" preenchidas com `-`.
 
-## Entrada minima
-- Modulo e tema da aula.
-- Populacao-alvo e contexto clinico (ambulatorio, urgencia, adolescencia, climatério etc.).
-- Janela temporal preferencial (ex.: ultimos 5 anos, com excecoes justificadas).
+## Fontes priorizadas
+- **Nacionais (busca em portugues):** FEBRASGO (`febrasgo.org.br`), Ministerio da Saude / CONITEC (`www.gov.br`).
+- **Internacionais (busca em ingles):** ACOG (`acog.org`), RCOG (`rcog.org.uk`), FIGO (`figo.org`), WHO (`who.int`), NAMS (`menopause.org`), ESHRE (`eshre.eu`).
 
-## Metodo de trabalho
-1. Mapear sociedades e orgaos de referencia para o tema:
-- Nacionais: FEBRASGO, MS/CONITEC, CFM e outros orgaos oficiais quando aplicavel.
-- Internacionais: ACOG, RCOG, FIGO, WHO, ESHRE, NAMS, ISSVD, ASCCP e correlatos por tema.
-2. Buscar documentos oficiais do tipo guideline/consensus/position statement.
-3. Priorizar documentos:
-- mais recentes
-- com maior autoridade institucional
-- com recomendacoes claras e aplicaveis
-4. Registrar conflitos entre recomendacoes (nacionais vs internacionais, ou entre sociedades).
-5. Classificar por prioridade:
-- Essencial (obrigatorio para a aula)
-- Complementar (agrega profundidade)
-- Contextual (util em cenarios especificos)
-
-## Criterios de inclusao
-- Documento oficial de sociedade/entidade reconhecida.
-- Relevancia direta para o tema da aula.
-- Atualidade adequada ou justificativa para documento classico.
-- Clareza de recomendacoes clinicas.
-
-## Criterios de exclusao
-- Texto opinativo sem lastro institucional.
-- Versao desatualizada quando existir atualizacao oficial.
-- Documento periferico sem impacto na conduta da aula.
+## Estrategia de busca
+1. Gerar dois conjuntos de termos:
+   - `guideline_terms_pt`: termos em portugues para fontes nacionais.
+   - `guideline_terms_en`: termos em ingles para fontes internacionais (`<tema EN> guideline`).
+2. Para cada fonte: executar busca filtrada por dominio (`site:<dominio> <termos>`), limitar a 3 candidatos por fonte.
+3. Pontuar e ordenar:
+   - Links que terminam em `.pdf` (ou contem `.pdf?`) sobem para o topo.
+   - URLs mais curtas (paginas oficiais raiz) preferidas a URLs longas.
+4. Consolidar limite global: 4 a 6 links totais.
 
 ## Saida obrigatoria
-Gerar `01_bibliografia/diretrizes_consensos.md` dentro da pasta de cada aula no seguinte formato:
+Gerar `01_bibliografia/diretrizes_consensos.md` no formato:
 
 ```md
-# Diretrizes e Consensos - <Modulo X / Aula Y>
+# Diretrizes e Consensos - M{X} / Aula {Y} - <tema>
 
-## 1) Metadados
-- Data da curadoria: YYYY-MM-DD
-- Tema:
-- Populacao:
-- Escopo clinico:
+**Data:** YYYY-MM-DD
+**Termos (PT):** `<termos pt>`
+**Termos (EN):** `<termos en>`
 
-## 2) Fontes selecionadas
-| Prioridade | Tipo | Titulo | Entidade | Ano | Pais/escopo | Link | Motivo da selecao |
-|---|---|---|---|---:|---|---|---|
-| Essencial | Guideline | ... | ... | ... | ... | ... | ... |
+## Fontes selecionadas (N)
+- **FEBRASGO** - [Posicionamento Oficial - Tema (2024)](https://febrasgo.org.br/.../arquivo.pdf) - PDF
+- **ACOG** - [Practice Bulletin #XXX](https://www.acog.org/...)
+- **RCOG** - [Green-top Guideline XX](https://www.rcog.org.uk/...)
 
-## 3) Principais recomendacoes para a aula
-| Fonte | Recomendacao-chave | Nivel de evidencia (se houver) | Impacto pratico no manejo |
-|---|---|---|---|
-| ... | ... | ... | ... |
+## Fontes consultadas
+- Nacionais: FEBRASGO, Ministerio da Saude / CONITEC
+- Internacionais: ACOG, RCOG, FIGO, WHO, NAMS, ESHRE
 
-## 4) Conflitos entre diretrizes
-| Tema do conflito | Fonte A | Fonte B | Diferenca pratica | Como abordar na aula |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
-
-## 5) Lacunas
-- ...
+## Observacoes
+- PDFs oficiais aparecem com marca `- PDF` no final da linha.
+- Sem extracao automatica de recomendacoes; leitura humana obrigatoria antes do texto.
 ```
 
 ## Regras criticas
-- Nunca inventar guideline, consenso, entidade, data ou link.
-- Sempre preferir link oficial da entidade (ou publicacao primaria equivalente).
-- Se nao houver diretriz robusta, declarar explicitamente.
-- Em conflito de recomendacao, nao forcar conciliacao artificial.
+- Nunca inventar titulo, entidade ou link.
+- Sempre filtrar por dominio oficial; nunca aceitar dominios secundarios (medscape, wikipedia, blogs).
+- Quando nao encontrar candidatos em uma fonte, omitir aquela fonte do output (nao incluir linha vazia).
+- Sem tabelas Markdown; sem secoes "Conflitos entre diretrizes" preenchidas com placeholders.
 
 ## Definicao de pronto
-- Lista priorizada e rastreavel de fontes normativas.
-- Recomendacoes-chave extraidas para uso no texto da aula.
-- Conflitos e lacunas explicitados com clareza.
+- 4 a 6 links validos no total, oriundos de pelo menos 3 fontes diferentes (quando possivel).
+- PDFs marcados quando disponiveis.
+- Termos PT e EN registrados no cabecalho para reproducao.
