@@ -134,6 +134,26 @@ def format_phase1_result(result: Phase1Result) -> str:
 # ---------------------------------------------------------------------------
 
 
+INTERNATIONAL_GUIDELINES_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "guidelines": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "source": {"type": "STRING"},
+                    "title": {"type": "STRING"},
+                    "url": {"type": "STRING"},
+                },
+                "required": ["source", "title", "url"],
+            },
+        }
+    },
+    "required": ["guidelines"],
+}
+
+
 SEARCH_TERMS_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -351,20 +371,29 @@ def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTe
     found: list[dict] = []
     search_engine = "google_cse" if (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) else "duckduckgo"
 
-    def _scan(sources, search_terms: str, lang: str):
-        for source_name, domain in sources:
+    # Nacionais: busca por dominio (CSE com fallback DDG)
+    for source_name, domain in GUIDELINE_SOURCES_PT:
+        if len(found) >= GUIDELINES_LIMIT:
+            break
+        links = domain_search(domain=domain, terms=terms.guideline_terms_pt, limit=3)
+        for link in _rank_guideline_links(links):
             if len(found) >= GUIDELINES_LIMIT:
-                return
-            links = domain_search(domain=domain, terms=search_terms, limit=3)
-            for link in _rank_guideline_links(links):
-                if len(found) >= GUIDELINES_LIMIT:
-                    return
-                if any(existing["url"] == link["url"] for existing in found):
-                    continue
-                found.append({**link, "source": source_name, "lang": lang})
+                break
+            if any(existing["url"] == link["url"] for existing in found):
+                continue
+            found.append({**link, "source": source_name, "lang": "pt"})
 
-    _scan(GUIDELINE_SOURCES_PT, terms.guideline_terms_pt, "pt")
-    _scan(GUIDELINE_SOURCES_EN, terms.guideline_terms_en, "en")
+    # Internacionais: Gemini sugere URL canonica + validacao HTTP
+    if len(found) < GUIDELINES_LIMIT:
+        suggested = _suggest_international_guidelines(aula, terms.guideline_terms_en)
+        for link in suggested:
+            if len(found) >= GUIDELINES_LIMIT:
+                break
+            if any(existing["url"] == link["url"] for existing in found):
+                continue
+            link.setdefault("lang", "en")
+            link["is_pdf"] = link["url"].lower().endswith(".pdf") or ".pdf?" in link["url"].lower()
+            found.append(link)
 
     if found:
         items = "\n".join(
@@ -418,6 +447,85 @@ UPTODATE_LAY_PENALTIES = (
     "the-basics",
     "patient-information",
 )
+
+
+def _suggest_international_guidelines(aula: AulaItem, terms_en: str) -> list[dict]:
+    """Pede ao Gemini para listar diretrizes oficiais (ACOG/RCOG/FIGO/WHO/
+    NAMS/ESHRE) com URLs canonicas, e valida cada URL via HTTP HEAD."""
+    sources = ", ".join(name for name, _ in GUIDELINE_SOURCES_EN)
+    sys_prompt = (
+        "Você é um curador de diretrizes médicas. Liste diretrizes/consensos "
+        "oficiais publicados pelas principais sociedades internacionais de "
+        "ginecologia para o tema da aula. Forneça apenas documentos que você "
+        "tem alta confiança de existirem na URL informada. Nunca invente URL."
+    )
+    user_prompt = f"""Aula: M{aula.modulo_num} / Aula {aula.aula_num} - {aula.aula_tema}
+Termos de busca (EN): {terms_en}
+
+Liste de 3 a 6 diretrizes/consensos OFICIAIS publicadas por: {sources}.
+
+Para cada diretriz forneça:
+- source: nome da sociedade (ex.: ACOG, RCOG, FIGO, WHO, NAMS, ESHRE)
+- title: título do documento (ex.: "Practice Bulletin #194: Polycystic Ovary Syndrome")
+- url: URL canônica oficial da sociedade. Prefira PDF direto quando souber. URL deve estar no domínio oficial (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu).
+
+Regras:
+- Se não tiver alta confiança no link exato, omita aquela diretriz (eu prefiro lista menor a link errado).
+- Não invente URLs com padrão genérico tipo "/guidelines/<slug>". Só inclua se a URL realmente existe.
+- Inclua apenas documentos atualmente em vigor (não retirados/revogados)."""
+    try:
+        raw = generate_text(
+            sys_prompt,
+            user_prompt,
+            temperature=0.0,
+            max_tokens=1200,
+            response_schema=INTERNATIONAL_GUIDELINES_SCHEMA,
+        )
+    except Exception:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = _extract_json(raw) or {}
+
+    raw_items = data.get("guidelines") or []
+    allowed_domains = [d for _, d in GUIDELINE_SOURCES_EN]
+    validated: list[dict] = []
+    for item in raw_items:
+        url = (item.get("url") or "").strip()
+        source = (item.get("source") or "").strip()
+        title = (item.get("title") or "").strip()
+        if not url or not source or not title:
+            continue
+        parsed = urllib.parse.urlparse(url)
+        if not any(parsed.netloc.endswith(d) for d in allowed_domains):
+            continue
+        if not _validate_url(url):
+            continue
+        validated.append({"source": source, "title": title, "url": url})
+    return validated
+
+
+def _validate_url(url: str, timeout: int = 8) -> bool:
+    """Confirma que a URL responde 200/3xx via HEAD, com fallback GET parcial."""
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 GinecoKanban/1.0",
+                    "Accept": "*/*",
+                    **({"Range": "bytes=0-1023"} if method == "GET" else {}),
+                },
+                method=method,
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if 200 <= resp.status < 400:
+                    return True
+        except Exception:
+            continue
+    return False
 
 
 def _rank_uptodate_links(links: list[dict]) -> list[dict]:
