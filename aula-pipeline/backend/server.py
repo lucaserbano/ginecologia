@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
+import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,32 +25,46 @@ from schemas import (
     AulasState,
     DriveUploadRequest,
 )
-from settings import DRIVE_ROOT_FOLDER_ID, ensure_drive_env
+from settings import ALLOWED_ORIGINS, DRIVE_ROOT_FOLDER_ID, OPEN_FOLDER_ACTION_ENABLED, ensure_drive_env
 from store import REPO_ROOT, load_state, save_state, synchronize_with_filesystem, write_bootstrap_state
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = APP_ROOT / "dashboard"
+logger = logging.getLogger("gineco-api")
 
 app = FastAPI(title="Kanban Aulas Gineco", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.mount("/dashboard", StaticFiles(directory=str(DASHBOARD_DIR), html=False), name="dashboard")
+if DASHBOARD_DIR.exists():
+    app.mount("/dashboard", StaticFiles(directory=str(DASHBOARD_DIR), html=False), name="dashboard")
+else:
+    logger.warning("Dashboard directory ausente em %s; endpoints de UI local desativados.", DASHBOARD_DIR)
 
 
 @app.on_event("startup")
 def startup_bootstrap() -> None:
-    write_bootstrap_state()
+    try:
+        write_bootstrap_state()
+    except Exception as exc:
+        # Em Cloud Run, o container pode não carregar toda a árvore local do projeto.
+        # Não derrubar a API por bootstrap local não disponível.
+        logger.warning("Bootstrap local ignorado no startup: %s", exc)
 
 
 @app.get("/")
 def index() -> FileResponse:
+    if not DASHBOARD_DIR.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Dashboard local indisponível neste deploy. Use os endpoints /api/*.",
+        )
     return FileResponse(DASHBOARD_DIR / "index.html")
 
 
@@ -187,6 +203,57 @@ def upload_aula_file(aula_id: str, payload: DriveUploadRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Falha no upload para Drive: {exc}")
 
 
+@app.post("/api/aulas/{aula_id}/upload-browser")
+async def upload_aula_file_browser(
+    aula_id: str,
+    file: UploadFile = File(...),
+    target_subfolder: Optional[str] = Form(default=None),
+    target_name: Optional[str] = Form(default=None),
+) -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        service = build_drive(interactive=False)
+    except DriveAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    state = load_state()
+    state = synchronize_with_filesystem(state)
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada. Rode /api/drive/bootstrap.")
+
+    suffix = Path(file.filename or "upload.bin").suffix
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = Path(tmp.name)
+
+        uploaded = upload_local_file_for_aula(
+            aula=aula,
+            drive_service=service,
+            local_path=tmp_path,
+            target_subfolder=(target_subfolder or None),
+            target_name=(target_name or None),
+        )
+        save_state(state)
+        return {"ok": True, "message": "Upload via navegador concluído.", "file": uploaded}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha no upload via navegador: {exc}")
+    finally:
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+        await file.close()
+
+
 @app.post("/api/aulas/{aula_id}/actions/{action_route}", response_model=ActionResponse)
 def run_aula_action(aula_id: str, action_route: str, payload: Optional[ActionRequest] = None) -> ActionResponse:
     note = payload.note if payload else None
@@ -222,6 +289,9 @@ def _find_aula(state: AulasState, aula_id: str) -> Optional[AulaItem]:
 
 
 def _open_folder(path_str: str) -> tuple[bool, str]:
+    if not OPEN_FOLDER_ACTION_ENABLED:
+        return False, "Ação 'abrir pasta' desativada neste ambiente."
+
     path = Path(path_str)
     if not path.exists():
         return False, "Pasta da aula não existe mais no filesystem."
