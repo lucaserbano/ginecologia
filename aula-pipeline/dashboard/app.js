@@ -1,4 +1,4 @@
-const API_BASE = "";
+const API_BASE = resolveApiBase();
 const FALLBACK_COLUMNS = [
   ["proximas_aulas", "Próximas aulas"],
   ["bibliografia_em_geracao", "Bibliografia em geração"],
@@ -413,12 +413,8 @@ async function uploadFileForAula(aulaId, forceOpenDetail = false) {
     openDetail(aulaId);
   }
 
-  const defaultPath = `${aula.pasta_relativa}/${aula.id}.pptx`;
-  const localRelativePath = window.prompt(
-    "Caminho relativo ao repositório para upload no Drive:",
-    defaultPath
-  );
-  if (localRelativePath === null) return;
+  const file = await pickFileFromUser();
+  if (!file) return;
 
   const targetSubfolder = window.prompt(
     "Subpasta destino no Drive (opcional): 01_bibliografia, 02_livros_extraidos, 03_pdfs_artigos. Deixe vazio para raiz da aula.",
@@ -432,21 +428,15 @@ async function uploadFileForAula(aulaId, forceOpenDetail = false) {
   );
   if (targetName === null) return;
 
-  const payload = {
-    local_relative_path: localRelativePath.trim(),
-    target_subfolder: targetSubfolder.trim() || null,
-    target_name: targetName.trim() || null,
-  };
-  if (!payload.local_relative_path) {
-    showToast("Upload cancelado: caminho do arquivo vazio.", true);
-    return;
-  }
+  const formData = new FormData();
+  formData.append("file", file);
+  if (targetSubfolder.trim()) formData.append("target_subfolder", targetSubfolder.trim());
+  if (targetName.trim()) formData.append("target_name", targetName.trim());
 
   try {
-    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/upload`, {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/upload-browser`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: formData,
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
@@ -561,6 +551,43 @@ function normalizeText(v) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function resolveApiBase() {
+  const defaultCloudRunApi = "https://gineco-api-468351448933.us-central1.run.app";
+
+  const byWindow = String(window.KANBAN_API_BASE || "").trim();
+  if (byWindow) return byWindow.replace(/\/$/, "");
+
+  const fromQuery = new URLSearchParams(window.location.search).get("api_base");
+  if (fromQuery && fromQuery.trim()) {
+    const normalized = fromQuery.trim().replace(/\/$/, "");
+    window.localStorage.setItem("kanban_api_base", normalized);
+    return normalized;
+  }
+
+  const fromStorage = window.localStorage.getItem("kanban_api_base");
+  if (fromStorage && fromStorage.trim()) return fromStorage.trim().replace(/\/$/, "");
+
+  if (window.location.hostname.endsWith("github.io")) {
+    return defaultCloudRunApi;
+  }
+  return "";
+}
+
+function pickFileFromUser() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0] ? input.files[0] : null;
+      input.remove();
+      resolve(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+  });
 }
 
 async function tryLoadStaticFallback() {

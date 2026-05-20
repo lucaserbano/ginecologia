@@ -6,7 +6,8 @@
     <title>Ginecologia AFYA</title>
     <meta http-equiv="refresh" content="0; url=./aula-pipeline/dashboard/index.html" />
     <script>
-      window.location.replace("./aula-pipeline/dashboard/index.html");
+      const target = `./aula-pipeline/dashboard/index.html${window.location.search || ""}${window.location.hash || ""}`;
+      window.location.replace(target);
     </script>
   </head>
   <body>
