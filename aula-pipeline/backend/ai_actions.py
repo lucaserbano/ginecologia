@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from artifact_store import format_artifact_result, persist_ai_artifact
+from drive_artifacts import read_markdown_file_from_drive, read_markdown_group_from_drive
 from openrouter_client import OpenRouterError, generate_text
 from phase1_bibliografia import format_phase1_result, run_phase1_bibliografia
 from prompt_loader import load_agent_prompts, load_template
@@ -25,7 +26,8 @@ def run_ai_action_if_enabled(aula: AulaItem, action_key: str, note: Optional[str
     if action_key == "gerar_texto":
         if aula.status not in {"pdfs_adicionados", "texto_em_producao"}:
             return False, "Ação IA não aplicável no status atual."
-        output = _generate_aula_texto(aula, note)
+        bibliografia_context = _build_bibliografia_context(aula)
+        output = _generate_aula_texto(aula, bibliografia_context, note)
         artifact = persist_ai_artifact(aula, "04_aula_texto.md", output)
         aula.texto_preview = _truncate(output, 420)
         _set_status(aula, "texto_pronto_revisao", action_key, "Texto gerado por IA.")
@@ -34,7 +36,7 @@ def run_ai_action_if_enabled(aula: AulaItem, action_key: str, note: Optional[str
     if action_key == "enviar_revisao":
         if aula.status not in {"texto_pronto_revisao", "texto_em_producao"}:
             return False, "Ação IA não aplicável no status atual."
-        source = aula.ai_artifacts.get("04_aula_texto.md", aula.texto_preview or "")
+        source = _load_texto_source(aula)
         output = _generate_revisao(aula, source, note)
         artifact = persist_ai_artifact(aula, "06_revisao.md", output)
         aula.texto_preview = _truncate(output, 420)
@@ -44,11 +46,16 @@ def run_ai_action_if_enabled(aula: AulaItem, action_key: str, note: Optional[str
     if action_key == "gerar_pptx":
         if aula.status not in {"texto_revisado", "slides_em_producao"}:
             return False, "Ação IA não aplicável no status atual."
-        source = aula.ai_artifacts.get("06_revisao.md") or aula.ai_artifacts.get("04_aula_texto.md") or ""
-        output = _generate_outline_slides(aula, source, note)
-        artifact = persist_ai_artifact(aula, "05_outline_slides.md", output)
-        _set_status(aula, "pptx_pronto", action_key, "Outline de slides gerado por IA.")
-        return True, f"Outline de slides gerado por IA e PPTX marcado como pronto. {format_artifact_result(artifact)}"
+        source = _load_revisao_source(aula)
+        if aula.status == "texto_revisado":
+            output = _generate_outline_slides(aula, source, note)
+            artifact = persist_ai_artifact(aula, "05_outline_slides.md", output)
+            _set_status(aula, "slides_em_producao", action_key, "Outline de slides gerado por IA.")
+            return True, f"Outline de slides gerado por IA. {format_artifact_result(artifact)}"
+
+        # Segunda execução mantém o fluxo de duas etapas enquanto a montagem PPTX real é evoluída.
+        _set_status(aula, "pptx_pronto", action_key, "Etapa de slides finalizada.")
+        return True, "Etapa de slides concluída. Aula marcada como PPTX pronto."
 
     return False, "Ação não suportada pelo executor IA."
 
@@ -97,7 +104,7 @@ Formato obrigatório:
     return generate_text(sys, user, temperature=0.2, max_tokens=1800)
 
 
-def _generate_aula_texto(aula: AulaItem, note: Optional[str]) -> str:
+def _generate_aula_texto(aula: AulaItem, bibliografia: str, note: Optional[str]) -> str:
     agent_prompt = load_agent_prompts("redator-aula.md")
     system_prompt = load_template("system_prompt_aula.md")
     briefing = load_template("briefing_generico.yaml")
@@ -106,7 +113,6 @@ def _generate_aula_texto(aula: AulaItem, note: Optional[str]) -> str:
         "Produza conteúdo didático, objetivo e aplicável à prática clínica.\n\n"
         f"{system_prompt}\n\n{agent_prompt}"
     )
-    bib = aula.ai_artifacts.get("01_bibliografia.md", "")
     user = f"""
 Com base na bibliografia e contexto, redija o texto da aula em português:
 - Aula: {aula.id}
@@ -114,7 +120,7 @@ Com base na bibliografia e contexto, redija o texto da aula em português:
 - Observação opcional do usuário: {note or "nenhuma"}
 
 Bibliografia disponível:
-{bib[:10000]}
+{bibliografia[:14000]}
 
 Briefing padrão:
 {briefing[:6000]}
@@ -192,3 +198,43 @@ def format_ai_error(exc: Exception) -> str:
     if isinstance(exc, OpenRouterError):
         return f"Falha OpenRouter: {exc}"
     return f"Falha IA: {exc}"
+
+
+def _build_bibliografia_context(aula: AulaItem) -> str:
+    from_drive = read_markdown_group_from_drive(
+        aula,
+        subfolder="01_bibliografia",
+        filenames=[
+            "01_bibliografia.md",
+            "diretrizes_consensos.md",
+            "pubmed_busca.md",
+            "uptodate.md",
+            "capitulos_livros.md",
+        ],
+    )
+    from_state = aula.ai_artifacts.get("01_bibliografia.md", "")
+
+    if from_drive and from_state:
+        return f"{from_drive}\n\n---\n\n# Fonte adicional (estado interno)\n\n{from_state}"
+    if from_drive:
+        return from_drive
+    if from_state:
+        return from_state
+    return "Bibliografia indisponível; redigir com cautela e explicitar lacunas para validação humana."
+
+
+def _load_texto_source(aula: AulaItem) -> str:
+    from_drive = read_markdown_file_from_drive(aula, "04_aula_texto.md", subfolder="04_aula_texto")
+    if from_drive:
+        return from_drive
+    return aula.ai_artifacts.get("04_aula_texto.md", aula.texto_preview or "")
+
+
+def _load_revisao_source(aula: AulaItem) -> str:
+    revisao = read_markdown_file_from_drive(aula, "06_revisao.md", subfolder="06_revisao")
+    if revisao:
+        return revisao
+    texto = _load_texto_source(aula)
+    if texto:
+        return texto
+    return aula.ai_artifacts.get("06_revisao.md", "")

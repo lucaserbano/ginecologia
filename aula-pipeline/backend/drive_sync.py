@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from drive_client import ensure_folder, get_file_by_id, list_children, upload_file_to_folder
+from drive_client import create_folder, ensure_folder, get_file_by_id, list_children, upload_file_to_folder
 from schemas import AulaItem, AulasState
 
 AULA_SUBFOLDERS = [
@@ -24,12 +24,27 @@ def _module_and_aula_folder_names(aula: AulaItem) -> tuple[str, str]:
     return f"M{aula.modulo_num}", aula.id
 
 
-def bootstrap_drive_structure(state: AulasState, drive_service, drive_root_folder_id: str) -> dict:
+def bootstrap_drive_structure(
+    state: AulasState,
+    drive_service,
+    drive_root_folder_id: str,
+    force_relink: bool = False,
+    max_aulas: Optional[int] = None,
+) -> dict:
     modules_cache: dict[str, str] = {}
     created_modules = 0
     linked_aulas = 0
+    skipped_ready = 0
+    aulas_processed = 0
 
     for aula in state.aulas:
+        if max_aulas is not None and aulas_processed >= max_aulas:
+            break
+
+        if not force_relink and _aula_drive_ready(aula):
+            skipped_ready += 1
+            continue
+
         module_folder_name, aula_folder_name = _module_and_aula_folder_names(aula)
 
         module_id = modules_cache.get(module_folder_name)
@@ -40,9 +55,13 @@ def bootstrap_drive_structure(state: AulasState, drive_service, drive_root_folde
             created_modules += 1
 
         aula_folder = None
-        if aula.drive_folder_id:
+        if aula.drive_folder_id and not force_relink:
             cached = get_file_by_id(drive_service, aula.drive_folder_id)
-            if cached and cached.get("mimeType") == "application/vnd.google-apps.folder":
+            if (
+                cached
+                and cached.get("mimeType") == "application/vnd.google-apps.folder"
+                and module_id in (cached.get("parents") or [])
+            ):
                 aula_folder = cached
 
         if not aula_folder:
@@ -52,17 +71,22 @@ def bootstrap_drive_structure(state: AulasState, drive_service, drive_root_folde
             linked_aulas += 1
         aula.drive_folder_id = aula_folder["id"]
 
-        subfolder_map: dict[str, str] = {}
-        for sub in AULA_SUBFOLDERS:
-            sf = ensure_folder(drive_service, aula_folder["id"], sub)
-            subfolder_map[sub] = sf["id"]
+        subfolder_map = _ensure_aula_subfolders(
+            drive_service=drive_service,
+            aula_folder_id=aula_folder["id"],
+        )
         aula.drive_subfolders = subfolder_map
+        aulas_processed += 1
 
     return {
         "modules_touched": len(modules_cache),
         "aulas_touched": len(state.aulas),
+        "aulas_processed": aulas_processed,
+        "aulas_skipped_ready": skipped_ready,
         "modules_created_or_found": created_modules,
         "aulas_linked_or_updated": linked_aulas,
+        "force_relink": force_relink,
+        "max_aulas": max_aulas,
     }
 
 
@@ -129,3 +153,26 @@ def upload_local_file_for_aula(
         folder_id=target_folder_id,
         target_name=target_name,
     )
+
+
+def _aula_drive_ready(aula: AulaItem) -> bool:
+    if not aula.drive_folder_id:
+        return False
+    if not aula.drive_subfolders:
+        return False
+    return all(name in aula.drive_subfolders for name in AULA_SUBFOLDERS)
+
+
+def _ensure_aula_subfolders(drive_service, aula_folder_id: str) -> dict[str, str]:
+    current = list_children(drive_service, aula_folder_id)
+    subfolders = {
+        item.get("name"): item.get("id")
+        for item in current
+        if item.get("mimeType") == "application/vnd.google-apps.folder"
+    }
+    for sub in AULA_SUBFOLDERS:
+        if sub in subfolders:
+            continue
+        created = create_folder(drive_service, aula_folder_id, sub)
+        subfolders[sub] = created["id"]
+    return {sub: subfolders[sub] for sub in AULA_SUBFOLDERS if sub in subfolders}

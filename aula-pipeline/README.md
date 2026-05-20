@@ -58,6 +58,17 @@ python3 -m uvicorn server:app --reload --host 127.0.0.1 --port 8787
 - `POST /api/aulas/{id}/upload`
 - `POST /api/aulas/{id}/upload-browser` (multipart/form-data, direto do navegador)
 
+### Bootstrap otimizado (anti-timeout)
+O endpoint `POST /api/drive/bootstrap` aceita query params opcionais:
+- `force_relink=true|false`: quando `true`, ignora vínculos antigos e religa as aulas para as pastas sob o `DRIVE_ROOT_FOLDER_ID` atual (útil em migração para Shared Drive).
+- `max_aulas=<n>`: processa em lotes (ex.: 50) para evitar timeout em ambientes com muitas aulas.
+
+Exemplos:
+```bash
+curl -X POST "https://SEU_BACKEND/api/drive/bootstrap?force_relink=true&max_aulas=50"
+curl -X POST "https://SEU_BACKEND/api/drive/bootstrap?max_aulas=50"
+```
+
 ## Execução de IA nas etapas do Kanban (Vertex AI / Gemini)
 O backend suporta execução real de IA ao clicar nas ações do Kanban.
 Backend padrão: `vertex` (Gemini no Google Cloud). Fallback opcional: `openrouter`.
@@ -66,14 +77,14 @@ Backend padrão: `vertex` (Gemini no Google Cloud). Fallback opcional: `openrout
 - `gerar-bibliografia`: gera bibliografia e marca `bibliografia_pronta`.
 - `gerar-texto`: gera texto da aula e marca `texto_pronto_revisao`.
 - `enviar-revisao`: revisa o texto e marca `texto_revisado`.
-- `gerar-pptx`: gera outline de slides e marca `pptx_pronto`.
+- `gerar-pptx`: 1ª execução gera outline e marca `slides_em_producao`; 2ª execução marca `pptx_pronto`.
 
 Os artefatos ficam no estado da aula em `ai_artifacts` (JSON) e, quando possível, também são gravados como arquivos Markdown e enviados automaticamente ao Drive.
 
 ### Artefatos automáticos
 - `gerar-bibliografia`: executa a fase 1, gerando `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md` e `01_bibliografia.md`; extrai capítulos de livros para `02_livros_extraidos` quando os PDFs estão disponíveis no Drive.
-- `gerar-texto`: gera `04_aula_texto.md`, grava na raiz local da aula quando disponível e envia ao Drive em `04_aula_texto`.
-- `enviar-revisao`: gera `06_revisao.md`, grava na raiz local da aula quando disponível e envia ao Drive em `06_revisao`.
+- `gerar-texto`: prioriza bibliografia em `01_bibliografia` no Drive (com fallback para estado interno), gera `04_aula_texto.md`, grava local quando possível e envia ao Drive em `04_aula_texto`.
+- `enviar-revisao`: prioriza `04_aula_texto.md` do Drive (com fallback para estado interno), gera `06_revisao.md`, grava local quando possível e envia ao Drive em `06_revisao`.
 - `gerar-pptx`: por enquanto gera `05_outline_slides.md`, grava na raiz local da aula quando disponível e envia ao Drive em `05_outline_slides`.
 
 As ações usam os prompts-base em `agents/*.md` quando esses arquivos estão disponíveis no ambiente. Para Cloud Run, use o deploy pelo Dockerfile da raiz do repositório para incluir `agents/` e `aulas/templates/` na imagem.

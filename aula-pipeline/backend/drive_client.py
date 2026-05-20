@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import mimetypes
 from pathlib import Path
@@ -16,7 +17,9 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from settings import (
     GOOGLE_DRIVE_AUTH_MODE,
+    GOOGLE_OAUTH_CLIENT_SECRET_JSON,
     GOOGLE_OAUTH_CLIENT_SECRET,
+    GOOGLE_OAUTH_TOKEN_JSON,
     GOOGLE_OAUTH_TOKEN_PATH,
     GOOGLE_SERVICE_ACCOUNT_FILE,
     GOOGLE_SERVICE_ACCOUNT_JSON,
@@ -36,13 +39,28 @@ def get_credentials(interactive: bool = False) -> Credentials:
 
     token_path = Path(GOOGLE_OAUTH_TOKEN_PATH)
     creds: Optional[Credentials] = None
+    token_from_env = False
 
-    if token_path.exists():
+    if GOOGLE_OAUTH_TOKEN_JSON:
+        try:
+            info = json.loads(GOOGLE_OAUTH_TOKEN_JSON)
+            creds = Credentials.from_authorized_user_info(info, SCOPES)
+            token_from_env = True
+        except Exception as exc:
+            raise DriveAuthError(f"GOOGLE_OAUTH_TOKEN_JSON inválido: {exc}")
+
+    if not creds and token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
 
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        _save_credentials(creds, token_path)
+        if not token_from_env:
+            try:
+                _save_credentials(creds, token_path)
+            except Exception:
+                # Em Cloud Run, o token pode estar montado como secret read-only.
+                # O refresh em memória já é suficiente para a requisição atual.
+                pass
 
     if creds and creds.valid:
         return creds
@@ -52,13 +70,30 @@ def get_credentials(interactive: bool = False) -> Credentials:
             "Credenciais OAuth ausentes/expiradas. Rode /api/drive/auth-start para autorizar."
         )
 
-    client_secret = Path(GOOGLE_OAUTH_CLIENT_SECRET)
-    if not client_secret.exists():
-        raise DriveAuthError(f"OAuth client JSON não encontrado: {client_secret}")
+    client_secret_path: Optional[Path] = None
+    tmp_client_file: Optional[Path] = None
+    if GOOGLE_OAUTH_CLIENT_SECRET_JSON:
+        try:
+            with open("/tmp/gineco_oauth_client.json", "w", encoding="utf-8") as fh:
+                fh.write(GOOGLE_OAUTH_CLIENT_SECRET_JSON)
+            tmp_client_file = Path("/tmp/gineco_oauth_client.json")
+            client_secret_path = tmp_client_file
+        except Exception as exc:
+            raise DriveAuthError(f"Falha ao preparar OAuth client JSON: {exc}")
+    else:
+        candidate = Path(GOOGLE_OAUTH_CLIENT_SECRET)
+        if not candidate.exists():
+            raise DriveAuthError(f"OAuth client JSON não encontrado: {candidate}")
+        client_secret_path = candidate
 
-    flow = InstalledAppFlow.from_client_secrets_file(str(client_secret), SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_path), SCOPES)
     creds = flow.run_local_server(port=0, open_browser=True)
     _save_credentials(creds, token_path)
+    if tmp_client_file and tmp_client_file.exists():
+        try:
+            tmp_client_file.unlink()
+        except Exception:
+            pass
     return creds
 
 
@@ -203,3 +238,13 @@ def download_file_to_path(service, file_id: str, target_path: Path) -> Path:
         while not done:
             _, done = downloader.next_chunk()
     return target_path
+
+
+def download_file_bytes(service, file_id: str) -> bytes:
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buffer.getvalue()

@@ -99,7 +99,7 @@ def drive_auth_start() -> dict:
 
 
 @app.post("/api/drive/bootstrap")
-def drive_bootstrap() -> dict:
+def drive_bootstrap(force_relink: bool = False, max_aulas: int = 0) -> dict:
     ok, message = ensure_drive_env()
     if not ok:
         raise HTTPException(status_code=400, detail=message)
@@ -111,7 +111,13 @@ def drive_bootstrap() -> dict:
     state = load_state()
     state = synchronize_with_filesystem(state)
     try:
-        summary = bootstrap_drive_structure(state, service, DRIVE_ROOT_FOLDER_ID)
+        summary = bootstrap_drive_structure(
+            state,
+            service,
+            DRIVE_ROOT_FOLDER_ID,
+            force_relink=force_relink,
+            max_aulas=(max_aulas if max_aulas > 0 else None),
+        )
         save_state(state)
         return {"ok": True, "message": "Estrutura de pastas no Drive sincronizada.", "summary": summary}
     except Exception as exc:

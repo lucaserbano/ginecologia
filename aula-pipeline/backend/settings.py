@@ -24,10 +24,12 @@ GOOGLE_OAUTH_CLIENT_SECRET = os.getenv(
     "GOOGLE_OAUTH_CLIENT_SECRET",
     str(BACKEND_DIR / "credentials" / "oauth_client.json"),
 )
+GOOGLE_OAUTH_CLIENT_SECRET_JSON = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET_JSON", "").strip()
 GOOGLE_OAUTH_TOKEN_PATH = os.getenv(
     "GOOGLE_OAUTH_TOKEN_PATH",
     str(BACKEND_DIR / "credentials" / "token.json"),
 )
+GOOGLE_OAUTH_TOKEN_JSON = os.getenv("GOOGLE_OAUTH_TOKEN_JSON", "").strip()
 OPEN_FOLDER_ACTION_ENABLED = os.getenv("OPEN_FOLDER_ACTION_ENABLED", "1").strip() in {"1", "true", "TRUE", "yes"}
 ALLOWED_ORIGINS = [
     item.strip()
@@ -70,6 +72,8 @@ def ensure_drive_env() -> tuple[bool, str]:
         # Em Cloud Run, pode usar identidade anexada ao serviço (ADC) sem arquivo/chave.
         return True, "ok"
 
+    if GOOGLE_OAUTH_CLIENT_SECRET_JSON:
+        return True, "ok"
     if not Path(GOOGLE_OAUTH_CLIENT_SECRET).exists():
         return False, f"Arquivo OAuth client não encontrado: {GOOGLE_OAUTH_CLIENT_SECRET}"
     return True, "ok"
