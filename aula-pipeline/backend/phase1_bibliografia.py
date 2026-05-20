@@ -524,22 +524,43 @@ Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor
     return validated
 
 
+SOFT_404_MARKERS = (
+    "notfound",
+    "not-found",
+    "404",
+    "page-not-found",
+    "/error",
+    "pagenotfound",
+)
+
+
 def _validate_url(url: str, timeout: int = 8) -> bool:
-    """Confirma que a URL responde 200/3xx via HEAD, com fallback GET parcial."""
-    for method in ("HEAD", "GET"):
+    """Confirma que a URL responde 200/3xx e nao caiu em soft-404.
+
+    Sites como ESHRE retornam 302 para /NotFound.aspx em URLs inexistentes;
+    aceitar 200 cego deixaria alucinacao passar. Por isso checamos a URL
+    final (apos redirects) por marcadores tipicos de pagina de erro.
+    """
+    # GET primeiro porque alguns sites (ACOG) cacheiam HEAD com 200 mesmo
+    # em URLs inexistentes; HEAD entra so como fallback de rede.
+    for method in ("GET", "HEAD"):
         try:
             req = urllib.request.Request(
                 url,
                 headers={
                     "User-Agent": "Mozilla/5.0 GinecoKanban/1.0",
                     "Accept": "*/*",
-                    **({"Range": "bytes=0-1023"} if method == "GET" else {}),
+                    **({"Range": "bytes=0-2047"} if method == "GET" else {}),
                 },
                 method=method,
             )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                if 200 <= resp.status < 400:
-                    return True
+                if not (200 <= resp.status < 400):
+                    continue
+                final_url = (resp.geturl() or url).lower()
+                if any(marker in final_url for marker in SOFT_404_MARKERS):
+                    return False
+                return True
         except Exception:
             continue
     return False
