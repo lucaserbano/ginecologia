@@ -165,14 +165,14 @@ def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
 Gere termos de busca estruturados:
 - tema_en: tradução curta e clínica do tema (1 linha em inglês).
 - pubmed_query: string PubMed em inglês usando MeSH e operadores booleanos. NÃO incluir filtros de tipo de estudo ou data (eu adiciono depois).
-- uptodate_query: termos curtos em inglês para buscar página /contents/ do UpToDate (sem operadores booleanos).
+- uptodate_query: termos em inglês cobrindo a tríade clínica (apresentação clínica + diagnóstico + tratamento) para retornar páginas /contents/ relevantes para uma aula médica. Evite focar em "patient education" ou "beyond the basics" (são páginas para leigos). Sem operadores booleanos.
 - guideline_terms_en: termos em inglês para buscar diretrizes em sites internacionais (ACOG, RCOG, FIGO, WHO, NAMS, ESHRE).
 - guideline_terms_pt: termos em português para buscar diretrizes nacionais (FEBRASGO, Ministério da Saúde).
 
 Exemplo para 'Sindrome dos ovarios policisticos':
 - tema_en: Polycystic ovary syndrome
 - pubmed_query: ("polycystic ovary syndrome"[MeSH Terms] OR "PCOS"[Title/Abstract]) AND (diagnosis OR treatment OR management)
-- uptodate_query: polycystic ovary syndrome diagnosis treatment
+- uptodate_query: polycystic ovary syndrome clinical manifestations diagnosis treatment management
 - guideline_terms_en: polycystic ovary syndrome PCOS guideline
 - guideline_terms_pt: sindrome dos ovarios policisticos SOP"""
     try:
@@ -317,8 +317,10 @@ def _format_pubmed_line(link: dict) -> str:
 
 
 def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
-    query = f"site:uptodate.com/contents {terms.uptodate_query}"
-    links = public_search(query, allowed=lambda url: _is_uptodate_content(url), limit=UPTODATE_LIMIT)
+    candidates = domain_search(domain="www.uptodate.com", terms=terms.uptodate_query, limit=8)
+    valid = [c for c in candidates if _is_uptodate_content(c["url"])]
+    ranked = _rank_uptodate_links(valid)
+    links = ranked[:UPTODATE_LIMIT]
 
     if links:
         items = "\n".join(f"- [{link['title']}]({link['url']})" for link in links)
@@ -392,6 +394,49 @@ def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTe
 - Sem extrair recomendações automaticamente — leitura humana obrigatória antes do texto.
 """
     return md, found[:GUIDELINES_LIMIT]
+
+
+UPTODATE_CLINICAL_BOOSTS = (
+    "clinical-manifestations",
+    "diagnosis",
+    "treatment",
+    "management",
+    "pathogenesis",
+    "pathophysiology",
+    "etiology",
+    "epidemiology",
+    "screening",
+    "prevention",
+    "evaluation",
+    "approach",
+    "overview",
+)
+
+UPTODATE_LAY_PENALTIES = (
+    "patient-education",
+    "beyond-the-basics",
+    "the-basics",
+    "patient-information",
+)
+
+
+def _rank_uptodate_links(links: list[dict]) -> list[dict]:
+    """Prioriza paginas clinicas (apresentacao, diagnostico, tratamento) e
+    penaliza paginas de educacao de paciente / linguagem leiga."""
+    scored: list[tuple[int, int, dict]] = []
+    for idx, link in enumerate(links):
+        slug = urllib.parse.urlparse(link["url"]).path.lower()
+        score = 0
+        for term in UPTODATE_CLINICAL_BOOSTS:
+            if term in slug:
+                score += 3
+        for term in UPTODATE_LAY_PENALTIES:
+            if term in slug:
+                score -= 5
+        # Empate: preserva ordem original do buscador.
+        scored.append((-score, idx, link))
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return [item[2] for item in scored]
 
 
 def _rank_guideline_links(links: list[dict]) -> list[dict]:
