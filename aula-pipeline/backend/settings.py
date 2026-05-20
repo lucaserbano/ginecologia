@@ -47,6 +47,12 @@ NCBI_EMAIL = os.getenv("NCBI_EMAIL", "").strip()
 NCBI_API_KEY = os.getenv("NCBI_API_KEY", "").strip()
 PHASE1_MAX_WEB_RESULTS = int(os.getenv("PHASE1_MAX_WEB_RESULTS", "8").strip())
 
+# Google Programmable Search Engine (opcional) - melhora muito a busca por
+# diretrizes em sites oficiais com operador site:. Quando GOOGLE_CSE_API_KEY
+# e GOOGLE_CSE_CX estao configurados, e usado em vez do DuckDuckGo Lite.
+GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
+GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX", "").strip()
+
 # Vertex AI (recomendado para usar créditos Google Cloud)
 VERTEX_PROJECT_ID = (
     os.getenv("VERTEX_PROJECT_ID", "").strip()

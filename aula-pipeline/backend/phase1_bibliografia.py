@@ -21,6 +21,8 @@ from openrouter_client import generate_text
 from schemas import AulaItem
 from settings import (
     BOOKS_DRIVE_FOLDER_ID,
+    GOOGLE_CSE_API_KEY,
+    GOOGLE_CSE_CX,
     NCBI_API_KEY,
     NCBI_EMAIL,
     NCBI_TOOL,
@@ -345,17 +347,13 @@ def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerm
 
 def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
     found: list[dict] = []
+    search_engine = "google_cse" if (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) else "duckduckgo"
 
     def _scan(sources, search_terms: str, lang: str):
         for source_name, domain in sources:
             if len(found) >= GUIDELINES_LIMIT:
                 return
-            query = f"site:{domain} {search_terms}"
-            links = public_search(
-                query,
-                allowed=lambda url, d=domain: d in urllib.parse.urlparse(url).netloc,
-                limit=3,
-            )
+            links = domain_search(domain=domain, terms=search_terms, limit=3)
             for link in _rank_guideline_links(links):
                 if len(found) >= GUIDELINES_LIMIT:
                     return
@@ -380,6 +378,7 @@ def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTe
 **Data:** {generated_at}
 **Termos (PT):** `{terms.guideline_terms_pt}`
 **Termos (EN):** `{terms.guideline_terms_en}`
+**Buscador:** {search_engine}
 
 ## Fontes selecionadas ({len(found)})
 {items}
@@ -597,6 +596,46 @@ def _summarize_pubtype(pubtypes: list[str]) -> str:
         if any(label.lower() == p.lower() for p in found):
             return label
     return found[0] if found else ""
+
+
+def domain_search(domain: str, terms: str, limit: int) -> list[dict]:
+    """Busca restrita a um dominio. Usa Google CSE se configurado; senao
+    cai para DuckDuckGo Lite com operador `site:`."""
+    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX:
+        try:
+            return google_cse_search(query=terms, site=domain, limit=limit)
+        except Exception:
+            pass  # fallback silencioso para DDG
+    return public_search(
+        f"site:{domain} {terms}",
+        allowed=lambda url, d=domain: d in urllib.parse.urlparse(url).netloc,
+        limit=limit,
+    )
+
+
+def google_cse_search(query: str, site: str, limit: int) -> list[dict]:
+    params = {
+        "key": GOOGLE_CSE_API_KEY,
+        "cx": GOOGLE_CSE_CX,
+        "q": query,
+        "siteSearch": site,
+        "siteSearchFilter": "i",
+        "num": str(min(max(limit, 1), 10)),
+    }
+    data = _fetch_json("https://www.googleapis.com/customsearch/v1", params)
+    items = data.get("items") or []
+    results: list[dict] = []
+    for item in items:
+        link = item.get("link") or ""
+        title = _clean_text(item.get("title") or "")
+        if not link or not title:
+            continue
+        if site not in urllib.parse.urlparse(link).netloc:
+            continue
+        results.append({"title": title, "url": link})
+        if len(results) >= limit:
+            break
+    return results
 
 
 def public_search(query: str, allowed: Callable[[str], bool], limit: int) -> list[dict]:
