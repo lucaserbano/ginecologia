@@ -56,6 +56,45 @@ python3 -m uvicorn server:app --reload --host 127.0.0.1 --port 8787
 - `POST /api/drive/bootstrap`
 - `GET /api/aulas/{id}/drive-files`
 - `POST /api/aulas/{id}/upload`
+- `POST /api/aulas/{id}/upload-browser` (multipart/form-data, direto do navegador)
+
+## Execução de IA nas etapas do Kanban (Vertex AI / Gemini)
+O backend suporta execução real de IA ao clicar nas ações do Kanban.
+Backend padrão: `vertex` (Gemini no Google Cloud). Fallback opcional: `openrouter`.
+
+### Como funciona
+- `gerar-bibliografia`: gera bibliografia e marca `bibliografia_pronta`.
+- `gerar-texto`: gera texto da aula e marca `texto_pronto_revisao`.
+- `enviar-revisao`: revisa o texto e marca `texto_revisado`.
+- `gerar-pptx`: gera outline de slides e marca `pptx_pronto`.
+
+Os artefatos ficam no estado da aula em `ai_artifacts` (JSON).
+
+### Ativação
+Definir no ambiente do backend:
+- `ENABLE_AI_ACTIONS=1`
+- `AI_BACKEND=vertex`
+- `VERTEX_PROJECT_ID=<seu-project-id>`
+- `VERTEX_LOCATION=us-central1`
+- `VERTEX_MODEL=gemini-2.5-flash`
+
+### Cloud Run (update sem redeploy completo)
+```bash
+gcloud run services update gineco-api \
+  --project project-5ca1d427-8a03-4908-8cb \
+  --region us-central1 \
+  --set-env-vars ENABLE_AI_ACTIONS=1,AI_BACKEND=vertex,VERTEX_PROJECT_ID=project-5ca1d427-8a03-4908-8cb,VERTEX_LOCATION=us-central1,VERTEX_MODEL=gemini-2.5-flash
+```
+
+Também habilite API Vertex AI no projeto:
+```bash
+gcloud services enable aiplatform.googleapis.com --project project-5ca1d427-8a03-4908-8cb
+```
+
+Opcional (fallback OpenRouter):
+- `AI_BACKEND=openrouter`
+- `OPENROUTER_API_KEY=...`
+- `OPENROUTER_MODEL=...`
 
 ## Limpeza de pastas duplicadas no Drive
 Script: `backend/drive_delete_duplicate_folders.py`
@@ -109,3 +148,42 @@ git push -u origin main
 - O backend sincroniza o estado com `aulas_em_producao/modulos` a cada carregamento.
 - A ação `abrir-pasta` tenta abrir o caminho no sistema operacional local.
 - **Nunca** suba credenciais/tokens no GitHub (já ignorados pelo `.gitignore` raiz).
+
+## Deploy Cloud Run (Service Account)
+Objetivo: frontend no GitHub Pages + backend FastAPI no Cloud Run.
+
+### 1) Pré-requisitos
+- `gcloud` instalado e autenticado.
+- Projeto GCP criado.
+- Drive API habilitada.
+- Service Account criada com chave JSON.
+- Pasta raiz do Drive compartilhada com o e-mail da Service Account (permissão: Editor).
+
+### 2) Variáveis no Cloud Run
+- `GOOGLE_DRIVE_AUTH_MODE=service_account`
+- `DRIVE_ROOT_FOLDER_ID=<ID da pasta raiz no Drive>`
+- `OPEN_FOLDER_ACTION_ENABLED=0`
+- `ALLOWED_ORIGINS=https://lucaserbano.github.io`
+
+### 3) Deploy do backend (sem chave JSON, usando identidade da Service Account)
+```bash
+cd aula-pipeline/backend
+gcloud run deploy gineco-api \
+  --source . \
+  --project project-5ca1d427-8a03-4908-8cb \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --service-account gineco-drive-sa@project-5ca1d427-8a03-4908-8cb.iam.gserviceaccount.com \
+  --set-env-vars GOOGLE_DRIVE_AUTH_MODE=service_account,DRIVE_ROOT_FOLDER_ID=SEU_DRIVE_ROOT_ID,OPEN_FOLDER_ACTION_ENABLED=0,ALLOWED_ORIGINS=https://lucaserbano.github.io
+```
+
+### 4) Ligar frontend GitHub Pages ao backend Cloud Run
+- Abrir:
+  - `https://lucaserbano.github.io/ginecologia/?api_base=https://SEU-SERVICO-xxxxxx-uc.a.run.app`
+- O frontend salva esse `api_base` no `localStorage`.
+- Para trocar depois: abra a URL novamente com novo `?api_base=...`.
+
+### 5) Teste ponta a ponta
+1. `Bootstrap Drive`
+2. `Listar arquivos Drive` numa aula
+3. `Upload para Drive` por aula (agora envia arquivo direto do navegador)
