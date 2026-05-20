@@ -244,6 +244,21 @@ function openDetail(aulaId) {
       await handleDriveAction(aula.id, target.dataset.driveAction, false);
     });
   }
+  const openAllBtn = detailContentEl.querySelector("[data-open-all]");
+  if (openAllBtn) {
+    openAllBtn.addEventListener("click", () => {
+      openLinksInTabs(collectAllLinks(aula));
+    });
+  }
+  for (const btn of detailContentEl.querySelectorAll("[data-open-group]")) {
+    btn.addEventListener("click", (e) => {
+      const target = e.currentTarget;
+      const groupKey = target.dataset.openGroup;
+      const groups = collectBibliografiaGroups(aula);
+      const grupo = groups.find((g) => g.key === groupKey);
+      openLinksInTabs(grupo ? grupo.links : []);
+    });
+  }
 }
 
 function buildDetailHtml(aula) {
@@ -268,6 +283,7 @@ function buildDetailHtml(aula) {
   const aiArtifacts = aula.ai_artifacts && Object.keys(aula.ai_artifacts).length
     ? `<ul>${Object.keys(aula.ai_artifacts).map((k) => `<li>${escapeHtml(k)}</li>`).join("")}</ul>`
     : "<p>Nenhum artefato de IA salvo.</p>";
+  const bibliografia = renderBibliografiaSection(aula);
 
   return `
     <section class="detail-grid">
@@ -295,6 +311,8 @@ function buildDetailHtml(aula) {
       <h3>Preview do texto</h3>
       ${preview}
     </section>
+
+    ${bibliografia}
 
     <section>
       <h3>Artefatos IA</h3>
@@ -456,6 +474,129 @@ async function uploadFileForAula(aulaId, forceOpenDetail = false) {
   } catch (err) {
     showToast(`Erro upload Drive: ${err.message}`, true);
   }
+}
+
+const BIBLIO_SOURCES = [
+  { key: "diretrizes_consensos.md", label: "Diretrizes e Consensos" },
+  { key: "pubmed_busca.md", label: "PubMed" },
+  { key: "uptodate.md", label: "UpToDate" },
+  { key: "capitulos_livros.md", label: "Livros (capítulos extraídos)" },
+];
+
+function renderBibliografiaSection(aula) {
+  const groups = collectBibliografiaGroups(aula);
+  const total = groups.reduce((n, g) => n + g.links.length, 0);
+  if (!total) {
+    return "";
+  }
+
+  const groupsHtml = groups
+    .filter((g) => g.links.length)
+    .map((g) => {
+      const items = g.links
+        .map(
+          (l, i) =>
+            `<li><a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(
+              l.title || l.url
+            )}</a>${l.meta ? ` <span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}</li>`
+        )
+        .join("");
+      return `
+        <div class="biblio-group">
+          <div class="biblio-group-head">
+            <h4>${escapeHtml(g.label)} <span class="biblio-count">${g.links.length}</span></h4>
+            <button class="btn ghost" data-open-group="${escapeAttr(g.key)}" data-id="${escapeAttr(
+        aula.id
+      )}">Abrir esta fonte</button>
+          </div>
+          <ul class="biblio-list">${items}</ul>
+        </div>`;
+    })
+    .join("");
+
+  return `
+    <section class="biblio">
+      <div class="biblio-head">
+        <h3>Bibliografia · ${total} links</h3>
+        <button class="btn primary" data-open-all="${escapeAttr(aula.id)}">Abrir todos os links</button>
+      </div>
+      <p class="biblio-hint">Cada link abre em uma nova aba. Se o navegador bloquear popups, permita-os para este site uma vez.</p>
+      ${groupsHtml}
+    </section>
+  `;
+}
+
+function collectBibliografiaGroups(aula) {
+  const artifacts = aula.ai_artifacts || {};
+  return BIBLIO_SOURCES.map(({ key, label }) => {
+    const md = artifacts[key] || "";
+    const links = extractLinksFromMarkdown(md);
+    return { key, label, links };
+  });
+}
+
+function collectAllLinks(aula) {
+  const groups = collectBibliografiaGroups(aula);
+  const seen = new Set();
+  const out = [];
+  for (const g of groups) {
+    for (const link of g.links) {
+      if (!link.url || seen.has(link.url)) continue;
+      seen.add(link.url);
+      out.push(link);
+    }
+  }
+  return out;
+}
+
+const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
+
+function extractLinksFromMarkdown(md) {
+  if (!md) return [];
+  const seen = new Set();
+  const links = [];
+  let match;
+  while ((match = MARKDOWN_LINK_RE.exec(md)) !== null) {
+    const title = (match[1] || "").trim();
+    const url = (match[2] || "").trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    // Captura meta depois do link: " — 2024 · NEJM · Practice Guideline" ou " · PDF"
+    const tail = md.slice(match.index + match[0].length, match.index + match[0].length + 240);
+    const metaMatch = tail.match(/^\s*[—\-]\s*([^\n]+?)(?=\n|$)/);
+    const pdfMatch = tail.match(/^\s*·\s*(PDF)(?=\b|\s|$)/);
+    let meta = "";
+    if (metaMatch) meta = metaMatch[1].trim();
+    else if (pdfMatch) meta = pdfMatch[1];
+    links.push({ title, url, meta });
+  }
+  return links;
+}
+
+function openLinksInTabs(links) {
+  if (!links.length) {
+    showToast("Sem links para abrir.", true);
+    return;
+  }
+  let opened = 0;
+  let blocked = 0;
+  for (const link of links) {
+    const win = window.open(link.url, "_blank", "noopener");
+    if (win) opened += 1;
+    else blocked += 1;
+  }
+  if (blocked > 0) {
+    showToast(
+      `Abertas ${opened} de ${links.length} abas. ${blocked} bloqueadas pelo navegador — autorize popups para este site.`,
+      true
+    );
+  } else {
+    showToast(`Abertas ${opened} aba(s).`);
+  }
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
 }
 
 function renderDriveFilesSection(aulaId) {
