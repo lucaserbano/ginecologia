@@ -77,8 +77,8 @@ def synchronize_with_filesystem(state: AulasState) -> AulasState:
     synced: list[AulaItem] = []
 
     if not MODULOS_ROOT.exists():
-        state.aulas = []
-        state.updated_at = now_utc()
+        # Ambiente cloud/stateless: sem árvore local de módulos.
+        # Mantém o estado carregado do JSON em vez de zerar as aulas.
         return state
 
     for mod_dir in sorted([p for p in MODULOS_ROOT.iterdir() if p.is_dir()]):
@@ -105,6 +105,7 @@ def synchronize_with_filesystem(state: AulasState) -> AulasState:
             historico = prev.historico if prev else []
             drive_folder_id = prev.drive_folder_id if prev else None
             drive_subfolders = prev.drive_subfolders if prev else {}
+            ai_artifacts = prev.ai_artifacts if prev else {}
 
             paths = detect_aula_paths(aula_dir)
             pdf_info = compute_pdf_info(paths["artigos_dir"], prev.pdfs if prev else None)
@@ -137,6 +138,7 @@ def synchronize_with_filesystem(state: AulasState) -> AulasState:
                     historico=historico,
                     drive_folder_id=drive_folder_id,
                     drive_subfolders=drive_subfolders,
+                    ai_artifacts=ai_artifacts,
                 )
             )
 

@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import json
 import mimetypes
 from pathlib import Path
 from typing import Optional
 
+import google.auth
+from google.auth.credentials import Credentials as GoogleAuthCredentials
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-from settings import GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_TOKEN_PATH
+from settings import (
+    GOOGLE_DRIVE_AUTH_MODE,
+    GOOGLE_OAUTH_CLIENT_SECRET,
+    GOOGLE_OAUTH_TOKEN_PATH,
+    GOOGLE_SERVICE_ACCOUNT_FILE,
+    GOOGLE_SERVICE_ACCOUNT_JSON,
+)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -21,6 +31,9 @@ class DriveAuthError(RuntimeError):
 
 
 def get_credentials(interactive: bool = False) -> Credentials:
+    if GOOGLE_DRIVE_AUTH_MODE == "service_account":
+        return get_service_account_credentials()
+
     token_path = Path(GOOGLE_OAUTH_TOKEN_PATH)
     creds: Optional[Credentials] = None
 
@@ -47,6 +60,23 @@ def get_credentials(interactive: bool = False) -> Credentials:
     creds = flow.run_local_server(port=0, open_browser=True)
     _save_credentials(creds, token_path)
     return creds
+
+
+def get_service_account_credentials() -> GoogleAuthCredentials:
+    if GOOGLE_SERVICE_ACCOUNT_JSON:
+        try:
+            info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+            return ServiceAccountCredentials.from_service_account_info(info, scopes=SCOPES)
+        except Exception as exc:
+            raise DriveAuthError(f"GOOGLE_SERVICE_ACCOUNT_JSON inválido: {exc}")
+
+    service_account_path = Path(GOOGLE_SERVICE_ACCOUNT_FILE)
+    if not service_account_path.exists():
+        # Fallback recomendado em Cloud Run: usar identidade anexada ao serviço
+        # sem chave JSON (ADC via metadata server).
+        creds, _ = google.auth.default(scopes=SCOPES)
+        return creds
+    return ServiceAccountCredentials.from_service_account_file(str(service_account_path), scopes=SCOPES)
 
 
 def build_drive(interactive: bool = False):

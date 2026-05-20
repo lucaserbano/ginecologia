@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+credentials/
+token.json
+oauth_client.json
+service_account.json

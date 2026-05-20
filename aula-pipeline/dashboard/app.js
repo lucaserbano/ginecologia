@@ -265,6 +265,9 @@ function buildDetailHtml(aula) {
   const preview = aula.texto_preview
     ? `<p class="preview">${escapeHtml(aula.texto_preview)}</p>`
     : "<p>Texto da aula ainda não disponível.</p>";
+  const aiArtifacts = aula.ai_artifacts && Object.keys(aula.ai_artifacts).length
+    ? `<ul>${Object.keys(aula.ai_artifacts).map((k) => `<li>${escapeHtml(k)}</li>`).join("")}</ul>`
+    : "<p>Nenhum artefato de IA salvo.</p>";
 
   return `
     <section class="detail-grid">
@@ -291,6 +294,11 @@ function buildDetailHtml(aula) {
     <section>
       <h3>Preview do texto</h3>
       ${preview}
+    </section>
+
+    <section>
+      <h3>Artefatos IA</h3>
+      ${aiArtifacts}
     </section>
 
     <section>

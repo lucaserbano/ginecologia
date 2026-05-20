@@ -116,6 +116,7 @@ class AulaItem(BaseModel):
     historico: list[HistoricoEvento] = Field(default_factory=list)
     drive_folder_id: Optional[str] = None
     drive_subfolders: dict[str, str] = Field(default_factory=dict)
+    ai_artifacts: dict[str, str] = Field(default_factory=dict)
 
 
 class AulasState(BaseModel):

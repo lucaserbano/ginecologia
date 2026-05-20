@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from drive_client import DriveAuthError, build_drive
 from drive_sync import bootstrap_drive_structure, list_aula_drive_files, upload_local_file_for_aula
+from ai_actions import format_ai_error, run_ai_action_if_enabled
 from pipeline_simulado import run_action
 from schemas import (
     ACTION_KEY_BY_ROUTE,
@@ -273,6 +274,15 @@ def run_aula_action(aula_id: str, action_route: str, payload: Optional[ActionReq
         ok, message = _open_folder(aula.pasta_absoluta)
         save_state(state)
         return ActionResponse(ok=ok, message=message, aula=aula)
+
+    try:
+        ai_handled, ai_message = run_ai_action_if_enabled(aula, action_key, note=note)
+        if ai_handled:
+            save_state(state)
+            return ActionResponse(ok=True, message=ai_message, aula=aula)
+    except Exception as exc:
+        save_state(state)
+        return ActionResponse(ok=False, message=format_ai_error(exc), aula=aula)
 
     aula, message = run_action(aula, action_key, note=note)
     save_state(state)
