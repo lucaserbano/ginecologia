@@ -46,7 +46,7 @@ GUIDELINE_SOURCES_EN = [
 
 PUBMED_LIMIT = 5
 UPTODATE_LIMIT = 3
-GUIDELINES_LIMIT = 6
+GUIDELINES_LIMIT = 8
 
 BOOK_TARGETS = [
     {
@@ -459,23 +459,36 @@ def _suggest_international_guidelines(aula: AulaItem, terms_en: str) -> list[dic
         "publicadas pelas principais sociedades internacionais de ginecologia "
         "para o tema da aula, com URLs canonicas do dominio oficial. As URLs "
         "serao validadas via HTTP, entao um link errado e descartado "
-        "automaticamente - prefira listar candidatos plausiveis a omitir."
+        "automaticamente - prefira listar mais candidatos plausiveis a omitir."
     )
     user_prompt = f"""Tema da aula: {aula.aula_tema}
 Termos de busca (EN): {terms_en}
 
-Liste 4 a 6 diretrizes/consensos oficiais sobre o tema, publicadas por: {sources}.
+Para cada uma das sociedades ({sources}), liste 2 a 3 documentos oficiais sobre o tema (total esperado: 10 a 18 candidatos).
 
-Para cada diretriz informe:
+Priorize:
+- Practice Bulletin, Committee Opinion (ACOG)
+- Green-top Guideline, Scientific Impact Paper (RCOG)
+- Guideline, Position Statement (FIGO, ESHRE, NAMS)
+- Recommendations, Guideline (WHO)
+- PDF direto da diretriz quando souber
+
+Evite (mas pode incluir como fallback se nao souber a versao tecnica):
+- FAQs e paginas de educacao de paciente
+- News, blog posts, paginas de membership
+
+Para cada documento informe:
 - source: nome da sociedade (ACOG, RCOG, FIGO, WHO, NAMS ou ESHRE)
-- title: titulo do documento
-- url: URL canonica no dominio oficial da sociedade (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu). Prefira PDF direto quando souber. URLs serao validadas via HTTP - listar candidatos plausiveis e melhor do que omitir."""
+- title: titulo do documento (com numero/codigo quando aplicavel, ex.: "Practice Bulletin #194")
+- url: URL canonica no dominio oficial (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu).
+
+Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor do que omitir."""
     try:
         raw = generate_text(
             sys_prompt,
             user_prompt,
             temperature=0.0,
-            max_tokens=2000,
+            max_tokens=4000,
             response_schema=INTERNATIONAL_GUIDELINES_SCHEMA,
             thinking_budget=0,
         )
@@ -489,26 +502,25 @@ Para cada diretriz informe:
         data = _extract_json(raw) or {}
 
     raw_items = data.get("guidelines") or []
-    print(f"[fase1/diretrizes] Gemini sugeriu {len(raw_items)} candidatos", flush=True)
     allowed_domains = [d for _, d in GUIDELINE_SOURCES_EN]
     validated: list[dict] = []
+    seen_urls: set[str] = set()
     for item in raw_items:
         url = (item.get("url") or "").strip()
         source = (item.get("source") or "").strip()
         title = (item.get("title") or "").strip()
         if not url or not source or not title:
-            print(f"[fase1/diretrizes] item incompleto: src={source} url={url}", flush=True)
+            continue
+        if url in seen_urls:
             continue
         parsed = urllib.parse.urlparse(url)
         if not any(parsed.netloc.endswith(d) for d in allowed_domains):
-            print(f"[fase1/diretrizes] dominio rejeitado: {url}", flush=True)
             continue
-        ok = _validate_url(url)
-        print(f"[fase1/diretrizes] validacao {source}: {'OK' if ok else 'FAIL'} {url}", flush=True)
-        if not ok:
+        if not _validate_url(url):
             continue
+        seen_urls.add(url)
         validated.append({"source": source, "title": title, "url": url})
-    print(f"[fase1/diretrizes] {len(validated)} URLs validadas", flush=True)
+    print(f"[fase1/diretrizes] Gemini={len(raw_items)} | validadas={len(validated)}", flush=True)
     return validated
 
 
