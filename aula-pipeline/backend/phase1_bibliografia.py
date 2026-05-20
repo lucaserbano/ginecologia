@@ -454,25 +454,21 @@ def _suggest_international_guidelines(aula: AulaItem, terms_en: str) -> list[dic
     NAMS/ESHRE) com URLs canonicas, e valida cada URL via HTTP HEAD."""
     sources = ", ".join(name for name, _ in GUIDELINE_SOURCES_EN)
     sys_prompt = (
-        "Você é um curador de diretrizes médicas. Liste diretrizes/consensos "
-        "oficiais publicados pelas principais sociedades internacionais de "
-        "ginecologia para o tema da aula. Forneça apenas documentos que você "
-        "tem alta confiança de existirem na URL informada. Nunca invente URL."
+        "Voce e um curador de diretrizes medicas. Liste diretrizes oficiais "
+        "publicadas pelas principais sociedades internacionais de ginecologia "
+        "para o tema da aula, com URLs canonicas do dominio oficial. As URLs "
+        "serao validadas via HTTP, entao um link errado e descartado "
+        "automaticamente - prefira listar candidatos plausiveis a omitir."
     )
-    user_prompt = f"""Aula: M{aula.modulo_num} / Aula {aula.aula_num} - {aula.aula_tema}
+    user_prompt = f"""Tema da aula: {aula.aula_tema}
 Termos de busca (EN): {terms_en}
 
-Liste de 3 a 6 diretrizes/consensos OFICIAIS publicadas por: {sources}.
+Liste 4 a 6 diretrizes/consensos oficiais sobre o tema, publicadas por: {sources}.
 
-Para cada diretriz forneça:
-- source: nome da sociedade (ex.: ACOG, RCOG, FIGO, WHO, NAMS, ESHRE)
-- title: título do documento (ex.: "Practice Bulletin #194: Polycystic Ovary Syndrome")
-- url: URL canônica oficial da sociedade. Prefira PDF direto quando souber. URL deve estar no domínio oficial (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu).
-
-Regras:
-- Se não tiver alta confiança no link exato, omita aquela diretriz (eu prefiro lista menor a link errado).
-- Não invente URLs com padrão genérico tipo "/guidelines/<slug>". Só inclua se a URL realmente existe.
-- Inclua apenas documentos atualmente em vigor (não retirados/revogados)."""
+Para cada diretriz informe:
+- source: nome da sociedade (ACOG, RCOG, FIGO, WHO, NAMS ou ESHRE)
+- title: titulo do documento
+- url: URL canonica no dominio oficial da sociedade (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu). Prefira PDF direto quando souber. URLs serao validadas via HTTP - listar candidatos plausiveis e melhor do que omitir."""
     try:
         raw = generate_text(
             sys_prompt,
