@@ -30,15 +30,39 @@ def is_openrouter_ready() -> bool:
     return bool(OPENROUTER_API_KEY and OPENROUTER_MODEL and OPENROUTER_URL)
 
 
-def generate_text(system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 2400) -> str:
+def generate_text(
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+    max_tokens: int = 2400,
+    response_schema: dict | None = None,
+) -> str:
+    """Gera texto via backend de IA configurado.
+
+    Quando `response_schema` e fornecido, ativa structured output no Vertex
+    (responseMimeType=application/json + responseSchema) garantindo JSON
+    valido. No path OpenRouter o parametro e ignorado (fallback de texto).
+    """
     if AI_BACKEND == "vertex":
-        return _generate_text_vertex(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
+        return _generate_text_vertex(
+            system_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_schema=response_schema,
+        )
     if AI_BACKEND == "openrouter":
         return _generate_text_openrouter(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
     raise OpenRouterError(f"AI_BACKEND inválido: {AI_BACKEND}. Use 'vertex' ou 'openrouter'.")
 
 
-def _generate_text_vertex(system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 2400) -> str:
+def _generate_text_vertex(
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+    max_tokens: int = 2400,
+    response_schema: dict | None = None,
+) -> str:
     if not VERTEX_PROJECT_ID:
         raise OpenRouterError("VERTEX_PROJECT_ID/GOOGLE_CLOUD_PROJECT não configurado.")
 
@@ -66,6 +90,11 @@ def _generate_text_vertex(system_prompt: str, user_prompt: str, temperature: flo
         "generationConfig": {
             "temperature": temperature,
             "maxOutputTokens": max_tokens,
+            **(
+                {"responseMimeType": "application/json", "responseSchema": response_schema}
+                if response_schema
+                else {}
+            ),
         },
     }
 

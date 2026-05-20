@@ -132,6 +132,25 @@ def format_phase1_result(result: Phase1Result) -> str:
 # ---------------------------------------------------------------------------
 
 
+SEARCH_TERMS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "tema_en": {"type": "STRING"},
+        "pubmed_query": {"type": "STRING"},
+        "uptodate_query": {"type": "STRING"},
+        "guideline_terms_en": {"type": "STRING"},
+        "guideline_terms_pt": {"type": "STRING"},
+    },
+    "required": [
+        "tema_en",
+        "pubmed_query",
+        "uptodate_query",
+        "guideline_terms_en",
+        "guideline_terms_pt",
+    ],
+}
+
+
 def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
     fallback = _fallback_terms(aula)
     sys_prompt = (
@@ -141,30 +160,35 @@ def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
     )
     user_prompt = f"""Aula: M{aula.modulo_num} - {aula.modulo_nome} / Aula {aula.aula_num} - {aula.aula_tema}
 
-Responda APENAS com JSON válido (sem markdown, sem ```), no formato:
-{{
-  "tema_en": "tradução curta e clínica do tema em inglês (1 linha)",
-  "pubmed_query": "string PubMed em inglês usando MeSH e operadores booleanos (sem filtros de tipo ou data; eu adiciono depois)",
-  "uptodate_query": "termos curtos em inglês para buscar página /contents/ do UpToDate (sem operadores)",
-  "guideline_terms_en": "termos em inglês para buscar diretrizes/guidelines em sites internacionais (ACOG, RCOG, FIGO, WHO, NAMS, ESHRE)",
-  "guideline_terms_pt": "termos em português para buscar diretrizes nacionais (FEBRASGO, Ministério da Saúde)"
-}}
+Gere termos de busca estruturados:
+- tema_en: tradução curta e clínica do tema (1 linha em inglês).
+- pubmed_query: string PubMed em inglês usando MeSH e operadores booleanos. NÃO incluir filtros de tipo de estudo ou data (eu adiciono depois).
+- uptodate_query: termos curtos em inglês para buscar página /contents/ do UpToDate (sem operadores booleanos).
+- guideline_terms_en: termos em inglês para buscar diretrizes em sites internacionais (ACOG, RCOG, FIGO, WHO, NAMS, ESHRE).
+- guideline_terms_pt: termos em português para buscar diretrizes nacionais (FEBRASGO, Ministério da Saúde).
 
-Exemplo (tema: 'Sindrome dos ovarios policisticos'):
-{{
-  "tema_en": "Polycystic ovary syndrome",
-  "pubmed_query": "(\\"polycystic ovary syndrome\\"[MeSH Terms] OR \\"PCOS\\"[Title/Abstract]) AND (diagnosis OR treatment OR management)",
-  "uptodate_query": "polycystic ovary syndrome diagnosis treatment",
-  "guideline_terms_en": "polycystic ovary syndrome PCOS guideline",
-  "guideline_terms_pt": "sindrome dos ovarios policisticos SOP"
-}}"""
+Exemplo para 'Sindrome dos ovarios policisticos':
+- tema_en: Polycystic ovary syndrome
+- pubmed_query: ("polycystic ovary syndrome"[MeSH Terms] OR "PCOS"[Title/Abstract]) AND (diagnosis OR treatment OR management)
+- uptodate_query: polycystic ovary syndrome diagnosis treatment
+- guideline_terms_en: polycystic ovary syndrome PCOS guideline
+- guideline_terms_pt: sindrome dos ovarios policisticos SOP"""
     try:
-        raw = generate_text(sys_prompt, user_prompt, temperature=0.1, max_tokens=600)
+        raw = generate_text(
+            sys_prompt,
+            user_prompt,
+            temperature=0.1,
+            max_tokens=800,
+            response_schema=SEARCH_TERMS_SCHEMA,
+        )
     except Exception as exc:
         warnings.append(f"Gemini indisponível para queries da fase 1: {exc}")
         return fallback
 
-    data = _extract_json(raw)
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = _extract_json(raw)
     if not data:
         warnings.append("Gemini retornou JSON inválido para queries da fase 1.")
         return fallback
