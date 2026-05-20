@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -8,9 +9,25 @@ from typing import Optional
 
 from schemas import AulasState, NEXT_ACTION_BY_STATUS, AulaItem, PdfInfo
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-STATE_FILE = REPO_ROOT / "aula-pipeline" / "data" / "aulas.json"
-MODULOS_ROOT = REPO_ROOT / "aulas_em_producao" / "modulos"
+BACKEND_DIR = Path(__file__).resolve().parent
+DEFAULT_REPO_ROOT = BACKEND_DIR.parents[1] if len(BACKEND_DIR.parents) > 1 else BACKEND_DIR
+REPO_ROOT = Path(os.getenv("REPO_ROOT", str(DEFAULT_REPO_ROOT))).resolve()
+
+PRIMARY_STATE_FILE = REPO_ROOT / "aula-pipeline" / "data" / "aulas.json"
+FALLBACK_STATE_FILE = BACKEND_DIR / "data" / "aulas.json"
+STATE_FILE = Path(
+    os.getenv(
+        "STATE_FILE",
+        str(PRIMARY_STATE_FILE if PRIMARY_STATE_FILE.parent.exists() else FALLBACK_STATE_FILE),
+    )
+).resolve()
+
+MODULOS_ROOT = Path(
+    os.getenv(
+        "MODULOS_ROOT",
+        str(REPO_ROOT / "aulas_em_producao" / "modulos"),
+    )
+).resolve()
 
 MODULE_RE = re.compile(r"^M(?P<m>\d+)_(?P<name>.+)$")
 AULA_RE = re.compile(r"^M(?P<m>\d+)_A(?P<a>\d+)_(?P<name>.+)$")
