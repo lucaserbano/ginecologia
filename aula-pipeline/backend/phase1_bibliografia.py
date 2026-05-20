@@ -200,8 +200,9 @@ Exemplo para 'Sindrome dos ovarios policisticos':
             sys_prompt,
             user_prompt,
             temperature=0.1,
-            max_tokens=800,
+            max_tokens=1200,
             response_schema=SEARCH_TERMS_SCHEMA,
+            thinking_budget=0,
         )
     except Exception as exc:
         warnings.append(f"Gemini indisponível para queries da fase 1: {exc}")
@@ -476,6 +477,7 @@ Para cada diretriz informe:
             temperature=0.0,
             max_tokens=2000,
             response_schema=INTERNATIONAL_GUIDELINES_SCHEMA,
+            thinking_budget=0,
         )
     except Exception as exc:
         print(f"[fase1/diretrizes] Gemini falhou: {exc}", flush=True)

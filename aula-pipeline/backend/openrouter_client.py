@@ -36,12 +36,14 @@ def generate_text(
     temperature: float = 0.2,
     max_tokens: int = 2400,
     response_schema: dict | None = None,
+    thinking_budget: int | None = None,
 ) -> str:
     """Gera texto via backend de IA configurado.
 
-    Quando `response_schema` e fornecido, ativa structured output no Vertex
-    (responseMimeType=application/json + responseSchema) garantindo JSON
-    valido. No path OpenRouter o parametro e ignorado (fallback de texto).
+    `response_schema`: ativa structured output no Vertex.
+    `thinking_budget`: passa thinkingConfig para Gemini 2.5+. Use 0 para
+    desativar reasoning interno em tarefas estruturais (mais barato e
+    libera o orcamento de maxOutputTokens). Ignorado no OpenRouter.
     """
     if AI_BACKEND == "vertex":
         return _generate_text_vertex(
@@ -50,6 +52,7 @@ def generate_text(
             temperature=temperature,
             max_tokens=max_tokens,
             response_schema=response_schema,
+            thinking_budget=thinking_budget,
         )
     if AI_BACKEND == "openrouter":
         return _generate_text_openrouter(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
@@ -62,6 +65,7 @@ def _generate_text_vertex(
     temperature: float = 0.2,
     max_tokens: int = 2400,
     response_schema: dict | None = None,
+    thinking_budget: int | None = None,
 ) -> str:
     if not VERTEX_PROJECT_ID:
         raise OpenRouterError("VERTEX_PROJECT_ID/GOOGLE_CLOUD_PROJECT não configurado.")
@@ -93,6 +97,11 @@ def _generate_text_vertex(
             **(
                 {"responseMimeType": "application/json", "responseSchema": response_schema}
                 if response_schema
+                else {}
+            ),
+            **(
+                {"thinkingConfig": {"thinkingBudget": thinking_budget}}
+                if thinking_budget is not None
                 else {}
             ),
         },
