@@ -35,8 +35,11 @@ No Google Drive a estrutura espelha esse layout por subpastas (`01_bibliografia`
 1. **Fase 1 - Bibliografia**: ler `aulas/temas.md`, selecionar modulo/aula, acionar `gerar-bibliografia` -> gera `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md`, `01_bibliografia.md` e extrai capitulos de livros para `02_livros_extraidos` quando ha PDF no Drive.
    - Queries sao geradas por Gemini (`_generate_search_terms` em `phase1_bibliografia.py`): tema PT -> EN, query PubMed com MeSH, termos EN para UpToDate/ACOG/RCOG/FIGO/WHO/NAMS/ESHRE e termos PT para FEBRASGO/MS-CONITEC.
    - PubMed: filtro `humans + 2019-3000 + (review|meta-analysis|RCT|practice guideline)`, com fallback sem filtro de tipo se < 3 resultados. Limite 5.
-   - UpToDate: limite 3, so links `/contents/`.
-   - Diretrizes: limite 6, PDFs sobem no ranking (`_rank_guideline_links`).
+   - UpToDate: limite 3, so links `/contents/`. Ranker prioriza tríade clinica (diagnosis/treatment/manifestations) e penaliza patient-education.
+   - Diretrizes:
+     - Nacionais (FEBRASGO, MS): `domain_search` via Google CSE (`GOOGLE_CSE_API_KEY`/`GOOGLE_CSE_CX` no Secret Manager) com fallback DuckDuckGo Lite.
+     - Internacionais (ACOG/RCOG/FIGO/WHO/NAMS/ESHRE): Gemini Pro sugere URLs canonicas + `_validate_url` (GET com Range, segue redirects, detecta soft-404 via markers `notfound|404|/error|page-not-found`) descarta alucinacoes.
+     - Limite total: 8.
    - Output e em **lista markdown clicavel**, sem tabelas nem placeholders vazios.
 2. **Fase 2 - Texto**: aguardar PDFs em `03_pdfs_artigos/`, acionar `gerar-texto` -> gera `04_aula_texto.md` (le bibliografia do Drive como fonte primaria).
 3. **Fase 3 - Revisao**: acionar `enviar-revisao` -> gera `06_revisao.md` (le texto do Drive como fonte primaria).
@@ -87,7 +90,7 @@ Conjunto minimo esperado:
 - `AI_BACKEND=vertex`
 - `VERTEX_PROJECT_ID=project-5ca1d427-8a03-4908-8cb`
 - `VERTEX_LOCATION=us-central1`
-- `VERTEX_MODEL=gemini-2.5-flash`
+- `VERTEX_MODEL=gemini-2.5-pro` (atual; Flash deu 0 validadas em diretrizes internacionais por falta de memoria das URLs canonicas)
 - `GOOGLE_DRIVE_AUTH_MODE=oauth` (NAO usar `service_account` no Drive pessoal)
 - `DRIVE_ROOT_FOLDER_ID=<id real da pasta raiz>`
 - `BOOKS_DRIVE_FOLDER_ID=1MfyJgRryqhSfj0cp0K3OX0ATkFfRZsiN`
@@ -129,6 +132,8 @@ Detalhes em `aula-pipeline/backend/schemas.py` (`NEXT_ACTION_BY_STATUS`).
 - Token de OAuth pode expirar; refresh em memoria funciona automaticamente, mas se o refresh token for revogado e preciso rotacionar o secret `gineco-oauth-token`.
 - Nunca commitar `aula-pipeline/backend/credentials/`, `*.env`, `token.json`. Ja ignorado em `.gitignore`.
 - PDFs/PPTX nao vao para o git (ja ignorados); ficam apenas no Drive.
+- **Gemini 2.5 Pro NAO aceita `thinkingBudget=0`** (so >= 128). `openrouter_client._resolve_thinking_budget` ignora a requisicao silenciosamente quando o modelo atual e Pro. Se mudar para Flash/Flash-Lite no futuro, o `thinking_budget=0` volta a ser respeitado.
+- Google CSE: a Custom Search JSON API exige a chave API criada via Console GCP (a CLI `gcloud alpha services api-keys create` cria keys com 403 persistente). CSE precisa de sites cadastrados em "Sites para pesquisar" (modo "Search the entire web" foi descontinuado).
 
 ## Estado da sessao 2026-05-20
 - Migracao para OAuth de usuario concluida; storageQuotaExceeded resolvido.

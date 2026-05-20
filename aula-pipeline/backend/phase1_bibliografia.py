@@ -515,11 +515,8 @@ Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor
             continue
         parsed = urllib.parse.urlparse(url)
         if not any(parsed.netloc.endswith(d) for d in allowed_domains):
-            print(f"[diretrizes] dominio rejeitado: {url}", flush=True)
             continue
-        ok = _validate_url(url)
-        print(f"[diretrizes] {source} {'OK' if ok else 'FAIL'}: {url}", flush=True)
-        if not ok:
+        if not _validate_url(url):
             continue
         seen_urls.add(url)
         validated.append({"source": source, "title": title, "url": url})
