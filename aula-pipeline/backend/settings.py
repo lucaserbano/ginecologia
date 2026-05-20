@@ -38,6 +38,13 @@ ENABLE_AI_ACTIONS = os.getenv("ENABLE_AI_ACTIONS", "0").strip() in {"1", "true",
 AI_BACKEND = os.getenv("AI_BACKEND", "vertex").strip().lower()
 AI_TIMEOUT_SECONDS = int(os.getenv("AI_TIMEOUT_SECONDS", "90").strip())
 
+# Fase 1 (bibliografia/fontes)
+BOOKS_DRIVE_FOLDER_ID = os.getenv("BOOKS_DRIVE_FOLDER_ID", "1MfyJgRryqhSfj0cp0K3OX0ATkFfRZsiN").strip()
+NCBI_TOOL = os.getenv("NCBI_TOOL", "GinecoKanban").strip()
+NCBI_EMAIL = os.getenv("NCBI_EMAIL", "").strip()
+NCBI_API_KEY = os.getenv("NCBI_API_KEY", "").strip()
+PHASE1_MAX_WEB_RESULTS = int(os.getenv("PHASE1_MAX_WEB_RESULTS", "8").strip())
+
 # Vertex AI (recomendado para usar créditos Google Cloud)
 VERTEX_PROJECT_ID = (
     os.getenv("VERTEX_PROJECT_ID", "").strip()

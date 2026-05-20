@@ -12,7 +12,7 @@ from google.oauth2.credentials import Credentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from settings import (
     GOOGLE_DRIVE_AUTH_MODE,
@@ -192,3 +192,14 @@ def upload_file_to_folder(service, local_path: Path, folder_id: str, target_name
         )
         .execute()
     )
+
+
+def download_file_to_path(service, file_id: str, target_path: Path) -> Path:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    with target_path.open("wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+    return target_path

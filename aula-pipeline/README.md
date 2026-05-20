@@ -68,7 +68,22 @@ Backend padrão: `vertex` (Gemini no Google Cloud). Fallback opcional: `openrout
 - `enviar-revisao`: revisa o texto e marca `texto_revisado`.
 - `gerar-pptx`: gera outline de slides e marca `pptx_pronto`.
 
-Os artefatos ficam no estado da aula em `ai_artifacts` (JSON).
+Os artefatos ficam no estado da aula em `ai_artifacts` (JSON) e, quando possível, também são gravados como arquivos Markdown e enviados automaticamente ao Drive.
+
+### Artefatos automáticos
+- `gerar-bibliografia`: executa a fase 1, gerando `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md` e `01_bibliografia.md`; extrai capítulos de livros para `02_livros_extraidos` quando os PDFs estão disponíveis no Drive.
+- `gerar-texto`: gera `04_aula_texto.md`, grava na raiz local da aula quando disponível e envia ao Drive em `04_aula_texto`.
+- `enviar-revisao`: gera `06_revisao.md`, grava na raiz local da aula quando disponível e envia ao Drive em `06_revisao`.
+- `gerar-pptx`: por enquanto gera `05_outline_slides.md`, grava na raiz local da aula quando disponível e envia ao Drive em `05_outline_slides`.
+
+As ações usam os prompts-base em `agents/*.md` quando esses arquivos estão disponíveis no ambiente. Para Cloud Run, use o deploy pelo Dockerfile da raiz do repositório para incluir `agents/` e `aulas/templates/` na imagem.
+
+### Configuração da fase 1
+- `BOOKS_DRIVE_FOLDER_ID`: pasta Drive dos livros-base. Padrão: `1MfyJgRryqhSfj0cp0K3OX0ATkFfRZsiN`.
+- `NCBI_TOOL`: identificador da aplicação nas chamadas NCBI. Padrão: `GinecoKanban`.
+- `NCBI_EMAIL`: opcional, recomendado pelo NCBI para contato em caso de uso excessivo.
+- `NCBI_API_KEY`: opcional e não paga; aumenta limite de requisições do E-utilities.
+- `PHASE1_MAX_WEB_RESULTS`: máximo de candidatos de diretrizes coletados em busca pública.
 
 ### Ativação
 Definir no ambiente do backend:
@@ -167,7 +182,7 @@ Objetivo: frontend no GitHub Pages + backend FastAPI no Cloud Run.
 
 ### 3) Deploy do backend (sem chave JSON, usando identidade da Service Account)
 ```bash
-cd aula-pipeline/backend
+cd "/Users/lucas/Downloads/GINECOLOGIA - AFYA"
 gcloud run deploy gineco-api \
   --source . \
   --project project-5ca1d427-8a03-4908-8cb \

@@ -3,6 +3,13 @@
 ## Missao
 Receber modulo + tema da aula, localizar os capitulos mais aderentes nos dois livros-base e extrair os PDFs para a pasta da aula.
 
+## Localizacao dos livros-base
+- Pasta Google Drive dos livros: `1MfyJgRryqhSfj0cp0K3OX0ATkFfRZsiN`
+- Para executar o script localmente, os PDFs precisam estar sincronizados em `livros/` com os nomes esperados pelo preset:
+  - `livros/tratado-de-ginecologia-da-febrasgo.pdf`
+  - `livros/Williams Ginecologia.pdf`
+- Se os PDFs locais estiverem ausentes, baixar/sincronizar a partir da pasta Drive acima antes da extracao.
+
 ## Tarefas obrigatorias
 1. Receber:
 - nome/numero do modulo

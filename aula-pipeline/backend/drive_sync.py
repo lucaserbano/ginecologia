@@ -6,7 +6,14 @@ from typing import Optional
 from drive_client import ensure_folder, get_file_by_id, list_children, upload_file_to_folder
 from schemas import AulaItem, AulasState
 
-AULA_SUBFOLDERS = ["01_bibliografia", "02_livros_extraidos", "03_pdfs_artigos"]
+AULA_SUBFOLDERS = [
+    "01_bibliografia",
+    "02_livros_extraidos",
+    "03_pdfs_artigos",
+    "04_aula_texto",
+    "05_outline_slides",
+    "06_revisao",
+]
 
 
 def _module_and_aula_folder_names(aula: AulaItem) -> tuple[str, str]:
