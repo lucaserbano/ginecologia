@@ -100,8 +100,8 @@ def _generate_text_vertex(
                 else {}
             ),
             **(
-                {"thinkingConfig": {"thinkingBudget": thinking_budget}}
-                if thinking_budget is not None
+                {"thinkingConfig": {"thinkingBudget": _resolve_thinking_budget(thinking_budget)}}
+                if _resolve_thinking_budget(thinking_budget) is not None
                 else {}
             ),
         },
@@ -206,6 +206,20 @@ def _generate_text_openrouter(system_prompt: str, user_prompt: str, temperature:
             return joined
 
     raise OpenRouterError("OpenRouter retornou conteúdo vazio.")
+
+
+def _resolve_thinking_budget(requested: int | None) -> int | None:
+    """Ajusta thinking_budget para o modelo atual.
+
+    Gemini 2.5 Pro NAO aceita thinking_budget=0 (precisa >= 128). Flash e
+    Flash-Lite aceitam 0 (desliga thinking). Quando o caller pede 0 mas o
+    modelo e Pro, retornamos None (deixa default dinamico).
+    """
+    if requested is None:
+        return None
+    if requested == 0 and "pro" in (VERTEX_MODEL or "").lower():
+        return None
+    return requested
 
 
 def _vertex_model_endpoint(model: str) -> str:

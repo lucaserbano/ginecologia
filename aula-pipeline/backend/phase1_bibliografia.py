@@ -200,7 +200,7 @@ Exemplo para 'Sindrome dos ovarios policisticos':
             sys_prompt,
             user_prompt,
             temperature=0.1,
-            max_tokens=1200,
+            max_tokens=4000,
             response_schema=SEARCH_TERMS_SCHEMA,
             thinking_budget=0,
         )
@@ -488,7 +488,7 @@ Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor
             sys_prompt,
             user_prompt,
             temperature=0.0,
-            max_tokens=4000,
+            max_tokens=8000,
             response_schema=INTERNATIONAL_GUIDELINES_SCHEMA,
             thinking_budget=0,
         )
