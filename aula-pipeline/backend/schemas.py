@@ -134,6 +134,17 @@ class TextoRequest(BaseModel):
     conteudo: str
 
 
+class RemoverLinkRequest(BaseModel):
+    source: Literal[
+        "diretrizes_consensos.md",
+        "pubmed_busca.md",
+        "uptodate.md",
+        "capitulos_livros.md",
+        "01_bibliografia.md",
+    ]
+    url: str
+
+
 class TextoResponse(BaseModel):
     ok: bool
     conteudo: str = ""

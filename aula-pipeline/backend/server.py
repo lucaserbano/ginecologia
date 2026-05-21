@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import re
 from drive_artifacts import read_markdown_file_from_drive, write_markdown_file_to_drive
 from drive_client import DriveAuthError, build_drive
 from drive_sync import (
@@ -34,6 +35,7 @@ from schemas import (
     AulaItem,
     AulasState,
     DriveUploadRequest,
+    RemoverLinkRequest,
     TextoRequest,
     TextoResponse,
 )
@@ -482,6 +484,105 @@ def put_aula_texto(aula_id: str, payload: TextoRequest) -> TextoResponse:
     aula.texto_preview = (payload.conteudo or "")[:420].strip() or None
     save_state(state)
     return TextoResponse(ok=True, conteudo=payload.conteudo, fonte="drive")
+
+
+# ---------------------------------------------------------------------------
+# Bibliografia: remover um link de uma fonte (.md)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/aulas/{aula_id}/bibliografia/remover-link")
+def remover_link_bibliografia(aula_id: str, payload: RemoverLinkRequest) -> dict:
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+
+    source = payload.source
+    target_url = (payload.url or "").strip()
+    if not target_url:
+        raise HTTPException(status_code=400, detail="URL vazia.")
+
+    # Fonte: estado interno tem prioridade; se não, tenta Drive.
+    conteudo = aula.ai_artifacts.get(source) or ""
+    if not conteudo:
+        conteudo = read_markdown_file_from_drive(aula, source, subfolder="01_bibliografia")
+    if not conteudo:
+        raise HTTPException(status_code=404, detail=f"Arquivo {source} não encontrado para esta aula.")
+
+    novo_conteudo, removidos = _remove_link_from_markdown(conteudo, target_url)
+    if removidos == 0:
+        raise HTTPException(status_code=404, detail="Link não encontrado no arquivo.")
+
+    # Grava no estado interno.
+    aula.ai_artifacts[source] = novo_conteudo
+
+    # Grava no Drive (se possível) usando o helper genérico.
+    drive_written = False
+    drive_err = ""
+    if aula.drive_folder_id:
+        ok, msg = ensure_drive_env()
+        if ok:
+            try:
+                write_markdown_file_to_drive(
+                    aula=aula,
+                    filename=source,
+                    content=novo_conteudo,
+                    subfolder="01_bibliografia",
+                )
+                drive_written = True
+            except Exception as exc:
+                drive_err = str(exc)
+
+    save_state(state)
+    return {
+        "ok": True,
+        "removidos": removidos,
+        "drive_written": drive_written,
+        "drive_error": drive_err,
+        "source": source,
+    }
+
+
+def _remove_link_from_markdown(content: str, target_url: str) -> tuple[str, int]:
+    """Remove de `content` qualquer linha (e suas continuações de bullet)
+    que contenha exatamente `target_url` como link Markdown ou URL bruta.
+    Retorna o conteúdo novo e o número de blocos removidos."""
+    # Normaliza para comparação (sem fragment).
+    needle = target_url.split("#")[0].rstrip("/")
+    lines = content.splitlines()
+    out: list[str] = []
+    skip_continuation = False
+    removed = 0
+    i = 0
+    bullet_re = re.compile(r"^\s*([-*+]|\d+\.)\s+")
+    while i < len(lines):
+        line = lines[i]
+        line_urls = re.findall(r"https?://[^\s)>\]]+", line)
+        match = any(u.split("#")[0].rstrip("/") == needle for u in line_urls)
+        if match and bullet_re.match(line):
+            # Pula linha do bullet + linhas seguintes que sejam continuação (recuo > primeira).
+            removed += 1
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                if not nxt.strip():
+                    break
+                if bullet_re.match(nxt):
+                    break
+                # Continuação indentada — pula.
+                if nxt.startswith(("  ", "\t")):
+                    i += 1
+                    continue
+                break
+            continue
+        out.append(line)
+        i += 1
+    novo = "\n".join(out)
+    # Preserva newline final se original tinha.
+    if content.endswith("\n") and not novo.endswith("\n"):
+        novo += "\n"
+    return novo, removed
 
 
 def _find_aula(state: AulasState, aula_id: str) -> Optional[AulaItem]:

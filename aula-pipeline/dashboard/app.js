@@ -214,6 +214,7 @@ function renderCardActions(aula) {
 
     case "bibliografia_pronta":
       buttons.push(linksBtn(aula, "Abrir todos os links"));
+      buttons.push(livrosBtn(aula));
       buttons.push(actionBtn("marcar-pdfs-baixados", "PDFs baixados", "color-pdf"));
       break;
 
@@ -264,6 +265,15 @@ function editorBtn(aula, label, colorClass = "color-texto") {
 
 function linksBtn(aula, label) {
   return `<button class="btn primary" data-open-all="${aula.id}">${escapeHtml(label)}</button>`;
+}
+
+function livrosBtn(aula) {
+  const folderId = aula.drive_subfolders?.["02_livros_extraidos"];
+  if (!folderId) {
+    return `<button class="btn secondary" disabled title="Pasta não localizada no Drive">Pasta dos livros</button>`;
+  }
+  const url = `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}`;
+  return `<a class="btn secondary" href="${escapeAttr(url)}" target="_blank" rel="noopener">Pasta dos livros</a>`;
 }
 
 function pptxBtn(aula, label) {
@@ -454,6 +464,36 @@ function openDetail(aulaId) {
   const editorBtnEl = detailContentEl.querySelector("[data-editor]");
   if (editorBtnEl) {
     editorBtnEl.addEventListener("click", () => openTextEditor(aula));
+  }
+  for (const btn of detailContentEl.querySelectorAll("[data-remove-link]")) {
+    btn.addEventListener("click", async (e) => {
+      const target = e.currentTarget;
+      const source = target.dataset.source;
+      const url = target.dataset.url;
+      await removerLinkBibliografia(aula.id, source, url);
+    });
+  }
+}
+
+async function removerLinkBibliografia(aulaId, source, url) {
+  if (!apiAvailable) {
+    showToast("Indisponível no modo somente leitura.", true);
+    return;
+  }
+  const ok = window.confirm(`Remover esta referência de ${source}?\n\n${url}`);
+  if (!ok) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/bibliografia/remover-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, url }),
+    });
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha");
+    showToast(payload.drive_written ? "Link removido (Drive atualizado)." : "Link removido (Drive não atualizado).");
+    await loadAll(false);
+  } catch (err) {
+    showToast(`Erro: ${err.message}`, true);
   }
 }
 
@@ -652,8 +692,12 @@ function renderBibliografiaSection(aula) {
     .map((g) => {
       const items = g.links
         .map(
-          (l) =>
-            `<li><a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>${l.meta ? ` <span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}</li>`
+          (l) => `
+            <li class="biblio-item">
+              <a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>
+              ${l.meta ? `<span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}
+              <button class="biblio-remove" title="Remover esta referência" data-remove-link data-source="${escapeAttr(g.key)}" data-url="${escapeAttr(l.url)}">✕</button>
+            </li>`
         )
         .join("");
       return `
@@ -667,13 +711,20 @@ function renderBibliografiaSection(aula) {
     })
     .join("");
 
+  const livrosFolderId = aula.drive_subfolders?.["02_livros_extraidos"];
+  const livrosLink = livrosFolderId
+    ? `<a class="btn secondary" href="https://drive.google.com/drive/folders/${encodeURIComponent(livrosFolderId)}" target="_blank" rel="noopener">Pasta dos livros (Drive)</a>`
+    : "";
   return `
     <section class="biblio">
       <div class="biblio-head">
         <h3>Bibliografia · ${total} links</h3>
-        <button class="btn primary" data-open-all="${escapeAttr(aula.id)}">Abrir todos os links</button>
+        <div class="biblio-head-actions">
+          ${livrosLink}
+          <button class="btn primary" data-open-all="${escapeAttr(aula.id)}">Abrir todos os links</button>
+        </div>
       </div>
-      <p class="biblio-hint">Se o navegador bloquear popups, autorize popups para este site (cadeado da URL → Permissões → Pop-ups → Permitir).</p>
+      <p class="biblio-hint">Se o navegador bloquear popups, clique no ícone de bloqueio na barra de endereço → Sempre permitir pop-ups deste site.</p>
       ${groupsHtml}
     </section>
   `;
@@ -732,14 +783,24 @@ function openLinksInTabs(links) {
   }
   let opened = 0;
   let blocked = 0;
-  for (const link of links) {
-    const win = window.open(link.url, "_blank", "noopener");
-    if (win) opened += 1;
-    else blocked += 1;
+  const stamp = Date.now();
+  // Usa nome de janela único por link para garantir que cada um vire uma aba
+  // separada (com `_blank` o navegador pode reaproveitar a mesma janela em
+  // alguns casos). Sem o terceiro parâmetro `features`, o navegador trata como
+  // nova aba — passar features força o popup, que costuma ser bloqueado.
+  for (let i = 0; i < links.length; i++) {
+    const target = `gineco-${stamp}-${i}`;
+    const win = window.open(links[i].url, target);
+    if (win) {
+      try { win.opener = null; } catch (_) { /* cross-origin: ignore */ }
+      opened += 1;
+    } else {
+      blocked += 1;
+    }
   }
   if (blocked > 0) {
     showToast(
-      `${opened}/${links.length} abertas. ${blocked} bloqueadas — clique no cadeado da URL → Permissões → Pop-ups → Permitir, e tente de novo.`,
+      `${opened}/${links.length} abertas. ${blocked} bloqueadas — clique no ícone de bloqueio de pop-ups na barra de endereço → Sempre permitir pop-ups deste site → Concluído → clique novamente em "Abrir todos".`,
       true
     );
   } else {

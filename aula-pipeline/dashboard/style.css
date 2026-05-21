@@ -432,6 +432,44 @@ h1 {
   margin-left: 0.35rem;
 }
 
+.biblio-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.biblio-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.biblio-item a {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.biblio-remove {
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.biblio-remove:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
 /* Spinner + progresso (coluna "Bibliografia em geração") */
 .card-progress {
   display: flex;
