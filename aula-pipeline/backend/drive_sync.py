@@ -217,10 +217,12 @@ def cleanup_duplicates_for_aula(drive_service, aula: AulaItem, dry_run: bool = F
                     "kept_id": keep.get("id"),
                 })
 
+    duplicates = [t for t in trashed if not t.get("error")]
     return {
         "aula_id": aula.id,
         "inspected": inspected,
-        "trashed_count": sum(1 for t in trashed if t.get("trashed")),
+        "duplicates_found": len(duplicates),
+        "trashed_count": sum(1 for t in duplicates if t.get("trashed")),
         "errors": sum(1 for t in trashed if t.get("error")),
         "dry_run": dry_run,
         "details": trashed,
@@ -231,6 +233,7 @@ def cleanup_duplicates_all(drive_service, state: AulasState, dry_run: bool = Fal
     """Roda cleanup_duplicates_for_aula em cada aula com drive_folder_id."""
     per_aula = []
     total_inspected = 0
+    total_duplicates = 0
     total_trashed = 0
     total_errors = 0
     for aula in state.aulas:
@@ -240,15 +243,18 @@ def cleanup_duplicates_all(drive_service, state: AulasState, dry_run: bool = Fal
         per_aula.append({
             "aula_id": report["aula_id"],
             "inspected": report.get("inspected", 0),
+            "duplicates_found": report.get("duplicates_found", 0),
             "trashed_count": report.get("trashed_count", 0),
             "errors": report.get("errors", 0),
         })
         total_inspected += report.get("inspected", 0)
+        total_duplicates += report.get("duplicates_found", 0)
         total_trashed += report.get("trashed_count", 0)
         total_errors += report.get("errors", 0)
     return {
         "aulas": len(per_aula),
         "inspected": total_inspected,
+        "duplicates_found": total_duplicates,
         "trashed_count": total_trashed,
         "errors": total_errors,
         "dry_run": dry_run,
