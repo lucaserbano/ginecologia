@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from drive_client import create_folder, ensure_folder, get_file_by_id, list_children, upload_file_to_folder
+from drive_client import (
+    create_folder,
+    ensure_folder,
+    get_file_by_id,
+    list_children,
+    trash_file,
+    upload_file_to_folder,
+)
 from schemas import AulaItem, AulasState
 
 AULA_SUBFOLDERS = [
@@ -153,6 +160,100 @@ def upload_local_file_for_aula(
         folder_id=target_folder_id,
         target_name=target_name,
     )
+
+
+def cleanup_duplicates_for_aula(drive_service, aula: AulaItem, dry_run: bool = False) -> dict:
+    """Dentro de cada subpasta da aula no Drive, mantem apenas o arquivo
+    com `modifiedTime` mais recente para cada nome unico; trasha os demais.
+
+    Pastas e arquivos sem nome sao ignorados. Retorna sumario com a
+    lista de arquivos trashed (so para auditoria).
+    """
+    if not aula.drive_folder_id:
+        return {"aula_id": aula.id, "skipped": True, "reason": "sem drive_folder_id"}
+
+    subfolder_ids: dict[str, str] = dict(aula.drive_subfolders or {})
+    if not subfolder_ids:
+        # Bootstrap leve: descobre as subpastas atualmente existentes.
+        for child in list_children(drive_service, aula.drive_folder_id):
+            if child.get("mimeType") == "application/vnd.google-apps.folder":
+                subfolder_ids[child.get("name")] = child.get("id")
+
+    trashed: list[dict] = []
+    inspected = 0
+    for sub_name, sub_id in subfolder_ids.items():
+        children = [c for c in list_children(drive_service, sub_id)
+                    if c.get("mimeType") != "application/vnd.google-apps.folder"]
+        inspected += len(children)
+        by_name: dict[str, list[dict]] = {}
+        for child in children:
+            name = child.get("name")
+            if not name:
+                continue
+            by_name.setdefault(name, []).append(child)
+
+        for name, group in by_name.items():
+            if len(group) <= 1:
+                continue
+            group.sort(key=lambda c: c.get("modifiedTime") or "", reverse=True)
+            keep = group[0]
+            for victim in group[1:]:
+                victim_id = victim.get("id")
+                if not victim_id:
+                    continue
+                if not dry_run:
+                    try:
+                        trash_file(drive_service, victim_id)
+                    except Exception as exc:
+                        trashed.append({
+                            "aula_id": aula.id, "subfolder": sub_name, "name": name,
+                            "id": victim_id, "trashed": False, "error": str(exc),
+                        })
+                        continue
+                trashed.append({
+                    "aula_id": aula.id, "subfolder": sub_name, "name": name,
+                    "id": victim_id, "modifiedTime": victim.get("modifiedTime"),
+                    "trashed": not dry_run,
+                    "kept_id": keep.get("id"),
+                })
+
+    return {
+        "aula_id": aula.id,
+        "inspected": inspected,
+        "trashed_count": sum(1 for t in trashed if t.get("trashed")),
+        "errors": sum(1 for t in trashed if t.get("error")),
+        "dry_run": dry_run,
+        "details": trashed,
+    }
+
+
+def cleanup_duplicates_all(drive_service, state: AulasState, dry_run: bool = False) -> dict:
+    """Roda cleanup_duplicates_for_aula em cada aula com drive_folder_id."""
+    per_aula = []
+    total_inspected = 0
+    total_trashed = 0
+    total_errors = 0
+    for aula in state.aulas:
+        if not aula.drive_folder_id:
+            continue
+        report = cleanup_duplicates_for_aula(drive_service, aula, dry_run=dry_run)
+        per_aula.append({
+            "aula_id": report["aula_id"],
+            "inspected": report.get("inspected", 0),
+            "trashed_count": report.get("trashed_count", 0),
+            "errors": report.get("errors", 0),
+        })
+        total_inspected += report.get("inspected", 0)
+        total_trashed += report.get("trashed_count", 0)
+        total_errors += report.get("errors", 0)
+    return {
+        "aulas": len(per_aula),
+        "inspected": total_inspected,
+        "trashed_count": total_trashed,
+        "errors": total_errors,
+        "dry_run": dry_run,
+        "per_aula": per_aula,
+    }
 
 
 def _aula_drive_ready(aula: AulaItem) -> bool:

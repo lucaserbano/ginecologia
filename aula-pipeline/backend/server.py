@@ -14,7 +14,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from drive_client import DriveAuthError, build_drive
-from drive_sync import bootstrap_drive_structure, list_aula_drive_files, upload_local_file_for_aula
+from drive_sync import (
+    bootstrap_drive_structure,
+    cleanup_duplicates_all,
+    list_aula_drive_files,
+    upload_local_file_for_aula,
+)
 from ai_actions import format_ai_error, run_ai_action_if_enabled
 from pipeline_simulado import run_action
 from schemas import (
@@ -122,6 +127,29 @@ def drive_bootstrap(force_relink: bool = False, max_aulas: int = 0) -> dict:
         return {"ok": True, "message": "Estrutura de pastas no Drive sincronizada.", "summary": summary}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Falha no bootstrap do Drive: {exc}")
+
+
+@app.post("/api/drive/cleanup")
+def drive_cleanup(dry_run: bool = False) -> dict:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        service = build_drive(interactive=False)
+    except DriveAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    state = load_state()
+    try:
+        summary = cleanup_duplicates_all(service, state, dry_run=dry_run)
+        mode = "dry-run" if dry_run else "executado"
+        return {
+            "ok": True,
+            "message": f"Limpeza de duplicatas no Drive ({mode}).",
+            "summary": summary,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha na limpeza Drive: {exc}")
 
 
 @app.get("/api/columns")

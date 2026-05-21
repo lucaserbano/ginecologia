@@ -209,10 +209,38 @@ def get_file_by_id(service, file_id: str) -> Optional[dict]:
         return None
 
 
-def upload_file_to_folder(service, local_path: Path, folder_id: str, target_name: Optional[str] = None) -> dict:
+def upload_file_to_folder(
+    service,
+    local_path: Path,
+    folder_id: str,
+    target_name: Optional[str] = None,
+    replace_existing: bool = True,
+) -> dict:
+    """Faz upload de um arquivo local para uma pasta do Drive.
+
+    Quando `replace_existing=True` (default), procura por arquivo com o
+    mesmo nome na pasta destino; se encontrar, faz `files.update` em vez
+    de `files.create`. Isso evita acumular duplicatas a cada execucao.
+    """
     name = target_name or local_path.name
     mime, _ = mimetypes.guess_type(str(local_path))
     media = MediaFileUpload(str(local_path), mimetype=mime or "application/octet-stream", resumable=False)
+    fields = "id,name,mimeType,webViewLink,size,modifiedTime"
+
+    if replace_existing:
+        existing = find_file_in_folder(service, folder_id=folder_id, name=name)
+        if existing:
+            return (
+                service.files()
+                .update(
+                    fileId=existing["id"],
+                    media_body=media,
+                    fields=fields,
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+
     body = {
         "name": name,
         "parents": [folder_id],
@@ -222,7 +250,46 @@ def upload_file_to_folder(service, local_path: Path, folder_id: str, target_name
         .create(
             body=body,
             media_body=media,
-            fields="id,name,mimeType,webViewLink,size,modifiedTime",
+            fields=fields,
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+
+
+def find_file_in_folder(service, folder_id: str, name: str) -> Optional[dict]:
+    """Procura um arquivo (nao-pasta) por nome dentro de uma pasta."""
+    escaped = name.replace("'", "\\'")
+    q = (
+        f"name='{escaped}' and '{folder_id}' in parents and "
+        f"mimeType!='{FOLDER_MIME}' and trashed=false"
+    )
+    resp = (
+        service.files()
+        .list(
+            q=q,
+            fields="files(id,name,mimeType,modifiedTime)",
+            corpora="allDrives",
+            spaces="drive",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            pageSize=10,
+            orderBy="modifiedTime desc",
+        )
+        .execute()
+    )
+    files = resp.get("files", [])
+    return files[0] if files else None
+
+
+def trash_file(service, file_id: str) -> dict:
+    """Move um arquivo para a lixeira do Drive (reversivel)."""
+    return (
+        service.files()
+        .update(
+            fileId=file_id,
+            body={"trashed": True},
+            fields="id,name,trashed",
             supportsAllDrives=True,
         )
         .execute()
