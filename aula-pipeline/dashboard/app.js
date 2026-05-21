@@ -768,8 +768,9 @@ function renderBibliografiaSection(aula) {
         .map(
           (l) => `
             <li class="biblio-item">
-              <a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>
-              ${l.meta ? `<span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}
+              <div class="biblio-item-text">
+                <a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>${l.meta ? ` <span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}
+              </div>
               <button class="biblio-remove" title="Remover esta referência" data-remove-link data-source="${escapeAttr(g.key)}" data-url="${escapeAttr(l.url)}">✕</button>
             </li>`
         )

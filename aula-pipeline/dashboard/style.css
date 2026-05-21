@@ -439,19 +439,29 @@ h1 {
 }
 
 .biblio-item {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+  align-items: start;
 }
 
-.biblio-item a {
-  flex: 1;
+.biblio-item-text {
   min-width: 0;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.biblio-item-text a {
+  text-decoration: none;
+}
+
+.biblio-item-text a:hover {
+  text-decoration: underline;
 }
 
 .biblio-remove {
-  flex-shrink: 0;
+  align-self: start;
+  margin-top: 2px;
   border: 1px solid transparent;
   background: transparent;
   color: #94a3b8;
