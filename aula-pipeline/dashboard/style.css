@@ -480,6 +480,12 @@ h1 {
   color: #b91c1c;
 }
 
+.biblio-item-removing {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
 /* Spinner + progresso (coluna "Bibliografia em geração") */
 .card-progress {
   display: flex;

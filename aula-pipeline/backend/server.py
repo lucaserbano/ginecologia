@@ -452,7 +452,11 @@ def get_aula_texto(aula_id: str) -> TextoResponse:
 
 
 @app.put("/api/aulas/{aula_id}/texto", response_model=TextoResponse)
-def put_aula_texto(aula_id: str, payload: TextoRequest) -> TextoResponse:
+def put_aula_texto(
+    aula_id: str,
+    payload: TextoRequest,
+    background_tasks: BackgroundTasks,
+) -> TextoResponse:
     ok, message = ensure_drive_env()
     if not ok:
         raise HTTPException(status_code=400, detail=message)
@@ -464,19 +468,36 @@ def put_aula_texto(aula_id: str, payload: TextoRequest) -> TextoResponse:
     if not aula.drive_folder_id:
         raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada. Rode /api/drive/bootstrap.")
 
+    # Resposta otimista: atualiza estado e dispara upload Drive em background.
+    aula.texto_preview = (payload.conteudo or "")[:420].strip() or None
+    # Remove pendencia anterior, se houver.
+    aula.pendencias = [p for p in aula.pendencias if not p.startswith("Falha ao salvar texto no Drive")]
+    save_aula(aula)
+
+    background_tasks.add_task(
+        _write_texto_drive_bg,
+        aula_id=aula_id,
+        conteudo=payload.conteudo,
+    )
+    return TextoResponse(ok=True, conteudo=payload.conteudo, fonte="drive")
+
+
+def _write_texto_drive_bg(aula_id: str, conteudo: str) -> None:
+    from store import load_aula
+    aula = load_aula(aula_id)
+    if not aula:
+        return
     try:
         write_markdown_file_to_drive(
             aula=aula,
             filename="04_aula_texto.md",
-            content=payload.conteudo,
+            content=conteudo,
             subfolder="04_aula_texto",
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Falha ao salvar texto no Drive: {exc}")
-
-    aula.texto_preview = (payload.conteudo or "")[:420].strip() or None
-    save_aula(aula)
-    return TextoResponse(ok=True, conteudo=payload.conteudo, fonte="drive")
+        a = load_aula(aula_id) or aula
+        a.pendencias = list(dict.fromkeys(a.pendencias + [f"Falha ao salvar texto no Drive: {exc}"]))
+        save_aula(a)
 
 
 BIBLIOGRAFIA_FILES = [
@@ -526,7 +547,11 @@ def rehidratar_bibliografia(aula_id: str) -> dict:
 
 
 @app.post("/api/aulas/{aula_id}/bibliografia/remover-link")
-def remover_link_bibliografia(aula_id: str, payload: RemoverLinkRequest) -> dict:
+def remover_link_bibliografia(
+    aula_id: str,
+    payload: RemoverLinkRequest,
+    background_tasks: BackgroundTasks,
+) -> dict:
     state = load_state()
     aula = _find_aula(state, aula_id)
     if not aula:
@@ -548,34 +573,47 @@ def remover_link_bibliografia(aula_id: str, payload: RemoverLinkRequest) -> dict
     if removidos == 0:
         raise HTTPException(status_code=404, detail="Link não encontrado no arquivo.")
 
-    # Grava no estado interno.
+    # Atualização otimista: já grava no estado. O upload Drive vai em background.
     aula.ai_artifacts[source] = novo_conteudo
-
-    # Grava no Drive (se possível) usando o helper genérico.
-    drive_written = False
-    drive_err = ""
-    if aula.drive_folder_id:
-        ok, msg = ensure_drive_env()
-        if ok:
-            try:
-                write_markdown_file_to_drive(
-                    aula=aula,
-                    filename=source,
-                    content=novo_conteudo,
-                    subfolder="01_bibliografia",
-                )
-                drive_written = True
-            except Exception as exc:
-                drive_err = str(exc)
-
+    aula.pendencias = [p for p in aula.pendencias if not p.startswith(f"Falha ao atualizar {source}")]
     save_aula(aula)
+
+    drive_scheduled = False
+    if aula.drive_folder_id:
+        ok, _msg = ensure_drive_env()
+        if ok:
+            background_tasks.add_task(
+                _write_bibliografia_drive_bg,
+                aula_id=aula_id,
+                filename=source,
+                conteudo=novo_conteudo,
+            )
+            drive_scheduled = True
+
     return {
         "ok": True,
         "removidos": removidos,
-        "drive_written": drive_written,
-        "drive_error": drive_err,
+        "drive_scheduled": drive_scheduled,
         "source": source,
     }
+
+
+def _write_bibliografia_drive_bg(aula_id: str, filename: str, conteudo: str) -> None:
+    from store import load_aula
+    aula = load_aula(aula_id)
+    if not aula:
+        return
+    try:
+        write_markdown_file_to_drive(
+            aula=aula,
+            filename=filename,
+            content=conteudo,
+            subfolder="01_bibliografia",
+        )
+    except Exception as exc:
+        a = load_aula(aula_id) or aula
+        a.pendencias = list(dict.fromkeys(a.pendencias + [f"Falha ao atualizar {filename} no Drive: {exc}"]))
+        save_aula(a)
 
 
 def _remove_link_from_markdown(content: str, target_url: str) -> tuple[str, int]:

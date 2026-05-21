@@ -412,7 +412,7 @@ async function openTextEditor(aula) {
     saveAdvanceBtn.disabled = true;
     try {
       await saveTexto(aula.id, textarea.value);
-      showToast("Texto salvo no Drive.");
+      showToast("Texto salvo. Sincronizando com o Drive…");
     } catch (err) {
       showToast(`Erro ao salvar: ${err.message}`, true);
     } finally {
@@ -518,9 +518,7 @@ function openDetail(aulaId) {
   for (const btn of detailContentEl.querySelectorAll("[data-remove-link]")) {
     btn.addEventListener("click", async (e) => {
       const target = e.currentTarget;
-      const source = target.dataset.source;
-      const url = target.dataset.url;
-      await removerLinkBibliografia(aula.id, source, url);
+      await removerLinkBibliografia(aula.id, target.dataset.source, target.dataset.url, target);
     });
   }
   for (const btn of detailContentEl.querySelectorAll("[data-rehidratar]")) {
@@ -528,13 +526,18 @@ function openDetail(aulaId) {
   }
 }
 
-async function removerLinkBibliografia(aulaId, source, url) {
+async function removerLinkBibliografia(aulaId, source, url, btnEl) {
   if (!apiAvailable) {
     showToast("Indisponível no modo somente leitura.", true);
     return;
   }
   const ok = window.confirm(`Remover esta referência de ${source}?\n\n${url}`);
   if (!ok) return;
+
+  // UI otimista: esconde o item na hora; restaura se a API falhar.
+  const itemEl = btnEl ? btnEl.closest(".biblio-item") : null;
+  if (itemEl) itemEl.classList.add("biblio-item-removing");
+
   try {
     const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/bibliografia/remover-link`, {
       method: "POST",
@@ -543,10 +546,17 @@ async function removerLinkBibliografia(aulaId, source, url) {
     });
     const payload = await res.json();
     if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha");
-    showToast(payload.drive_written ? "Link removido (Drive atualizado)." : "Link removido (Drive não atualizado).");
-    await loadAll(false);
+    if (itemEl) itemEl.remove();
+    showToast(
+      payload.drive_scheduled
+        ? "Referência removida. Sincronizando com o Drive…"
+        : "Referência removida."
+    );
+    // Recarrega em segundo plano para manter contadores corretos.
+    loadAll(false);
   } catch (err) {
-    showToast(`Erro: ${err.message}`, true);
+    if (itemEl) itemEl.classList.remove("biblio-item-removing");
+    showToast(`Erro ao remover: ${err.message}`, true);
   }
 }
 
