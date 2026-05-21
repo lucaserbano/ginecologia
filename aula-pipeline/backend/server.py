@@ -40,7 +40,7 @@ from schemas import (
     TextoResponse,
 )
 from settings import ALLOWED_ORIGINS, DRIVE_ROOT_FOLDER_ID, OPEN_FOLDER_ACTION_ENABLED, ensure_drive_env
-from store import REPO_ROOT, load_state, save_state, synchronize_with_filesystem, write_bootstrap_state
+from store import REPO_ROOT, load_state, save_aula, save_state, synchronize_with_filesystem, write_bootstrap_state
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = APP_ROOT / "dashboard"
@@ -169,7 +169,6 @@ def get_columns() -> dict:
 def list_aulas() -> AulasState:
     state = load_state()
     state = synchronize_with_filesystem(state)
-    save_state(state)
     return state
 
 
@@ -179,7 +178,6 @@ def get_aula(aula_id: str) -> AulaItem:
     state = synchronize_with_filesystem(state)
     for aula in state.aulas:
         if aula.id == aula_id:
-            save_state(state)
             return aula
     raise HTTPException(status_code=404, detail="Aula não encontrada")
 
@@ -204,7 +202,7 @@ def get_aula_drive_files(aula_id: str) -> dict:
 
     try:
         files = list_aula_drive_files(aula, service)
-        save_state(state)
+        save_aula(aula)
         return {"ok": True, "aula_id": aula.id, "count": len(files), "files": files}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Falha ao listar arquivos no Drive: {exc}")
@@ -240,7 +238,7 @@ def upload_aula_file(aula_id: str, payload: DriveUploadRequest) -> dict:
             target_subfolder=payload.target_subfolder,
             target_name=payload.target_name,
         )
-        save_state(state)
+        save_aula(aula)
         return {"ok": True, "message": "Upload concluído.", "file": uploaded}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Falha no upload para Drive: {exc}")
@@ -284,7 +282,7 @@ async def upload_aula_file_browser(
             target_subfolder=(target_subfolder or None),
             target_name=(target_name or None),
         )
-        save_state(state)
+        save_aula(aula)
         return {"ok": True, "message": "Upload via navegador concluído.", "file": uploaded}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Falha no upload via navegador: {exc}")
@@ -319,7 +317,7 @@ def run_aula_action(
 
     if action_key == "abrir_pasta":
         ok, message = _open_folder(aula.pasta_absoluta)
-        save_state(state)
+        save_aula(aula)
         return ActionResponse(ok=ok, message=message, aula=aula)
 
     if action_key == "gerar_bibliografia":
@@ -345,7 +343,7 @@ def run_aula_action(
         aula.progresso = "Iniciando…"
         aula.pendencias = []
         aula.updated_at = _dt.utcnow()
-        save_state(state)
+        save_aula(aula)
         background_tasks.add_task(_run_bibliografia_background, aula_id, note)
         return ActionResponse(ok=True, message="Geração de bibliografia iniciada em segundo plano.", aula=aula)
 
@@ -370,20 +368,20 @@ def run_aula_action(
         # avancar_etapa pode ter pulado se status já fora de fluxo; forçamos:
         if aula.status != "pptx_na_pasta_final":
             _force_status(aula, "pptx_na_pasta_final", "mover_pptx_final", "PPTX movido para pasta final.")
-        save_state(state)
+        save_aula(aula)
         return ActionResponse(ok=True, message="PPTX movido para a pasta final do módulo.", aula=aula)
 
     try:
         ai_handled, ai_message = run_ai_action_if_enabled(aula, action_key, note=note)
         if ai_handled:
-            save_state(state)
+            save_aula(aula)
             return ActionResponse(ok=True, message=ai_message, aula=aula)
     except Exception as exc:
-        save_state(state)
+        save_aula(aula)
         return ActionResponse(ok=False, message=format_ai_error(exc), aula=aula)
 
     aula, message = run_action(aula, action_key, note=note)
-    save_state(state)
+    save_aula(aula)
 
     ok = not message.startswith("Ação '")
     return ActionResponse(ok=ok, message=message, aula=aula)
@@ -410,33 +408,28 @@ def _force_status(aula: AulaItem, new_status: str, acao: str, mensagem: str) -> 
 
 
 def _run_bibliografia_background(aula_id: str, note: Optional[str]) -> None:
-    state = load_state()
-    aula = _find_aula(state, aula_id)
+    from store import load_aula
+    aula = load_aula(aula_id)
     if not aula:
         return
 
     def _on_progress(msg: str) -> None:
-        # Cada step relê estado para evitar overwrite por outras ações.
-        st = load_state()
-        a = _find_aula(st, aula_id)
+        # Cada step relê a aula em isolado pra evitar overwrite e minimizar writes.
+        a = load_aula(aula_id)
         if not a:
             return
         a.progresso = msg
-        save_state(st)
+        save_aula(a)
 
     try:
         run_bibliografia_sync(aula, note, on_progress=_on_progress)
-        save_state(state)
+        save_aula(aula)
     except Exception as exc:
-        # Reaquire e marca erro para evitar perder logs intermediários.
-        st = load_state()
-        a = _find_aula(st, aula_id)
-        if not a:
-            return
+        a = load_aula(aula_id) or aula
         a.progresso = None
         a.pendencias = [f"Falha na geração da bibliografia: {exc}"]
         _force_status(a, "erro_bloqueada", "gerar_bibliografia", f"Erro: {exc}")
-        save_state(st)
+        save_aula(a)
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +475,7 @@ def put_aula_texto(aula_id: str, payload: TextoRequest) -> TextoResponse:
         raise HTTPException(status_code=500, detail=f"Falha ao salvar texto no Drive: {exc}")
 
     aula.texto_preview = (payload.conteudo or "")[:420].strip() or None
-    save_state(state)
+    save_aula(aula)
     return TextoResponse(ok=True, conteudo=payload.conteudo, fonte="drive")
 
 
@@ -518,7 +511,7 @@ def rehidratar_bibliografia(aula_id: str) -> dict:
             aula.ai_artifacts[filename] = conteudo
             carregados.append(filename)
 
-    save_state(state)
+    save_aula(aula)
     return {
         "ok": True,
         "aula_id": aula.id,
@@ -575,7 +568,7 @@ def remover_link_bibliografia(aula_id: str, payload: RemoverLinkRequest) -> dict
             except Exception as exc:
                 drive_err = str(exc)
 
-    save_state(state)
+    save_aula(aula)
     return {
         "ok": True,
         "removidos": removidos,

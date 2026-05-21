@@ -73,7 +73,7 @@ Agentes-prompt usados pelas acoes:
 - **Backend**: FastAPI em Cloud Run (servico `gineco-api`, regiao `us-central1`).
 - **Frontend**: GitHub Pages em `https://lucaserbano.github.io/ginecologia/`.
 - **Storage de artefatos**: Google Drive (uma pasta por aula com subpastas padronizadas).
-- **Estado**: `aula-pipeline/data/aulas.json` (in-container; ainda nao persistido entre revisoes - migrar para Firestore/Cloud SQL e o proximo passo).
+- **Estado**: **Firestore Native** (collection `aulas`, 1 doc por aula). `aulas.json` no repo serve apenas como seed inicial: na primeira invocacao com Firestore vazio, `store.load_state` migra o JSON para o Firestore (one-shot). Daí em diante todas as leituras/escritas vão pelo Firestore — sobrevive a deploys.
 - **IA**: Vertex AI / Gemini 2.5 Flash (backend `vertex`). Fallback opcional: OpenRouter.
 
 ## URLs e identificadores
@@ -107,6 +107,9 @@ Conjunto minimo esperado:
 - `GOOGLE_OAUTH_TOKEN_JSON` (via Secret Manager: `gineco-oauth-token`)
 - `ALLOWED_ORIGINS=https://lucaserbano.github.io`
 - `OPEN_FOLDER_ACTION_ENABLED=0`
+- `ENABLE_FIRESTORE=1` (default; setar `0` apenas para forçar fallback ao JSON local)
+- `FIRESTORE_PROJECT_ID=project-5ca1d427-8a03-4908-8cb` (default: usa VERTEX_PROJECT_ID)
+- `FIRESTORE_COLLECTION=aulas` (default)
 
 ## Deploy
 Sempre buildar a partir da raiz do repositorio (Dockerfile na raiz, traz `agents/` e `aulas/templates/` para a imagem):

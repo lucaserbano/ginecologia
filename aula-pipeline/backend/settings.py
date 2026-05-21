@@ -62,6 +62,15 @@ VERTEX_PROJECT_ID = (
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1").strip()
 VERTEX_MODEL = os.getenv("VERTEX_MODEL", "gemini-2.5-flash").strip()
 
+# Firestore (persistência do estado das aulas)
+FIRESTORE_PROJECT_ID = (
+    os.getenv("FIRESTORE_PROJECT_ID", "").strip()
+    or VERTEX_PROJECT_ID
+    or os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+)
+FIRESTORE_COLLECTION = os.getenv("FIRESTORE_COLLECTION", "aulas").strip()
+ENABLE_FIRESTORE = os.getenv("ENABLE_FIRESTORE", "1").strip() not in {"0", "false", "no"}
+
 # OpenRouter (opcional/fallback)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4").strip()
