@@ -2,43 +2,28 @@ const API_BASE = resolveApiBase();
 const FALLBACK_COLUMNS = [
   ["proximas_aulas", "Próximas aulas"],
   ["bibliografia_em_geracao", "Bibliografia em geração"],
-  ["bibliografia_pronta", "Bibliografia pronta"],
-  ["aguardando_aprovacao_fontes", "Aguardando aprovação das fontes"],
-  ["aguardando_pdfs", "Aguardando PDFs"],
-  ["pdfs_adicionados", "PDFs adicionados"],
-  ["texto_em_producao", "Texto em produção"],
-  ["texto_pronto_revisao", "Texto pronto para revisão"],
-  ["texto_revisado", "Texto revisado"],
-  ["slides_em_producao", "Slides em produção"],
-  ["pptx_pronto", "PPTX pronto"],
-  ["revisao_final", "Revisão final"],
-  ["concluida", "Concluída"],
+  ["bibliografia_pronta", "Bibliografia pronta para download"],
+  ["pdfs_baixados", "PDFs baixados"],
+  ["texto_feito", "Texto feito"],
+  ["texto_editado", "Texto editado"],
+  ["pptx_gerado", "PPTX gerado"],
+  ["pptx_finalizado", "PPTX finalizado"],
+  ["pptx_na_pasta_final", "PPTX na pasta final"],
   ["erro_bloqueada", "Erro / bloqueada"],
 ];
 
-const ACTIONS = [
-  { route: "avancar-etapa", label: "Avançar etapa" },
-  { route: "voltar-etapa", label: "Voltar etapa" },
-  { route: "gerar-bibliografia", label: "Gerar bibliografia" },
-  { route: "aprovar-bibliografia", label: "Aprovar bibliografia" },
-  { route: "marcar-pdfs", label: "Marcar PDFs" },
-  { route: "gerar-texto", label: "Gerar texto" },
-  { route: "enviar-revisao", label: "Enviar revisão" },
-  { route: "gerar-pptx", label: "Gerar PPTX" },
-  { route: "concluir", label: "Concluir" },
-  { route: "abrir-pasta", label: "Abrir pasta" },
-];
-
-const NEXT_ACTION_TO_ROUTE = {
-  "Gerar bibliografia": "gerar-bibliografia",
-  "Aprovar bibliografia": "aprovar-bibliografia",
-  "Marcar PDFs como baixados": "marcar-pdfs",
-  "Gerar texto da aula": "gerar-texto",
-  "Enviar para revisão": "enviar-revisao",
-  "Gerar PPTX": "gerar-pptx",
-  "Marcar como concluída": "concluir",
-  "Concluída": "concluir",
-  "Resolver bloqueio": "abrir-pasta",
+// Cores por coluna (fase 1 = verde-azulado, fase 2 = azul, fase 3 = roxo, fase 4 = âmbar, final = verde, erro = vermelho)
+const COLUMN_PHASE_CLASS = {
+  proximas_aulas: "phase-start",
+  bibliografia_em_geracao: "phase-1",
+  bibliografia_pronta: "phase-1",
+  pdfs_baixados: "phase-2",
+  texto_feito: "phase-2",
+  texto_editado: "phase-3",
+  pptx_gerado: "phase-4",
+  pptx_finalizado: "phase-4",
+  pptx_na_pasta_final: "phase-final",
+  erro_bloqueada: "phase-erro",
 };
 
 let state = null;
@@ -46,10 +31,8 @@ let columns = [];
 let selectedAulaId = null;
 const driveFilesCache = new Map();
 let apiAvailable = true;
-let filters = {
-  module: "",
-  theme: "",
-};
+let filters = { module: "", theme: "" };
+let pollTimer = null;
 
 const boardEl = document.getElementById("board");
 const statsEl = document.getElementById("stats");
@@ -92,29 +75,31 @@ async function loadAll(showMessage = false) {
       fetch(`${API_BASE}/api/aulas`),
       fetch(`${API_BASE}/api/columns`),
     ]);
-
-    if (!stateRes.ok || !colRes.ok) {
-      throw new Error("Falha ao carregar dados do backend.");
-    }
-
+    if (!stateRes.ok || !colRes.ok) throw new Error("Falha ao carregar dados do backend.");
     state = await stateRes.json();
     const colJson = await colRes.json();
-    columns = colJson.columns || [];
+    columns = colJson.columns || FALLBACK_COLUMNS;
     populateModuleFilter();
-
     renderStats();
     renderBoard();
-
-    if (selectedAulaId) {
-      openDetail(selectedAulaId);
-    }
-
+    if (selectedAulaId) openDetail(selectedAulaId);
+    schedulePollingIfNeeded();
     if (showMessage) showToast("Kanban sincronizado.");
   } catch (err) {
     const loadedFallback = await tryLoadStaticFallback();
-    if (!loadedFallback) {
-      showToast(`Erro: ${err.message}`, true);
-    }
+    if (!loadedFallback) showToast(`Erro: ${err.message}`, true);
+  }
+}
+
+function schedulePollingIfNeeded() {
+  // Auto-refresh enquanto houver bibliografia em geração.
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  const hasInflight = state?.aulas?.some((a) => a.status === "bibliografia_em_geracao");
+  if (hasInflight && apiAvailable) {
+    pollTimer = setTimeout(() => loadAll(false), 5000);
   }
 }
 
@@ -123,17 +108,17 @@ function renderStats() {
     statsEl.innerHTML = "<div class='stat'>Nenhuma aula encontrada.</div>";
     return;
   }
-
   const all = state.aulas;
   const filtered = getFilteredAulas();
   const total = filtered.length;
-  const concluidas = filtered.filter((a) => a.status === "concluida").length;
+  const finalizadas = filtered.filter((a) => a.status === "pptx_na_pasta_final").length;
   const bloqueadas = filtered.filter((a) => a.status === "erro_bloqueada").length;
-
+  const emGeracao = filtered.filter((a) => a.status === "bibliografia_em_geracao").length;
   statsEl.innerHTML = `
     <div class="stat"><strong>${total}</strong><span>Aulas exibidas</span></div>
     <div class="stat"><strong>${all.length}</strong><span>Aulas totais</span></div>
-    <div class="stat"><strong>${concluidas}</strong><span>Concluídas</span></div>
+    <div class="stat"><strong>${finalizadas}</strong><span>Na pasta final</span></div>
+    <div class="stat"><strong>${emGeracao}</strong><span>Bibliografia em geração</span></div>
     <div class="stat"><strong>${bloqueadas}</strong><span>Bloqueadas</span></div>
     <div class="stat"><strong>${new Date(state.updated_at).toLocaleString("pt-BR")}</strong><span>Última sincronização</span></div>
   `;
@@ -142,12 +127,11 @@ function renderStats() {
 function renderBoard() {
   boardEl.innerHTML = "";
   const filteredAulas = getFilteredAulas();
-
   for (const [statusKey, statusLabel] of columns) {
     const aulas = filteredAulas.filter((a) => a.status === statusKey);
-
+    const phaseClass = COLUMN_PHASE_CLASS[statusKey] || "phase-default";
     const column = document.createElement("section");
-    column.className = "column";
+    column.className = `column ${phaseClass}`;
     column.innerHTML = `
       <header class="column-head">
         <h3>${statusLabel}</h3>
@@ -155,68 +139,280 @@ function renderBoard() {
       </header>
       <div class="cards"></div>
     `;
-
     const cardsEl = column.querySelector(".cards");
-
     if (!aulas.length) {
       const empty = document.createElement("p");
       empty.className = "empty";
       empty.textContent = "Sem aulas nesta etapa.";
       cardsEl.appendChild(empty);
     } else {
-      for (const aula of aulas) {
-        cardsEl.appendChild(buildCard(aula));
-      }
+      for (const aula of aulas) cardsEl.appendChild(buildCard(aula));
     }
-
     boardEl.appendChild(column);
   }
 }
 
 function buildCard(aula) {
   const card = document.createElement("article");
-  card.className = "card";
+  card.className = `card phase-${COLUMN_PHASE_CLASS[aula.status] || "default"}`;
 
-  const nextRoute = NEXT_ACTION_TO_ROUTE[aula.proxima_acao] || "abrir-pasta";
-  const nextClass = getActionColorClass(nextRoute);
-
-  card.innerHTML = `
+  const headerHtml = `
     <div class="card-head">
       <p class="kicker">M${aula.modulo_num} · Aula ${aula.aula_num}</p>
       <h4>${escapeHtml(aula.aula_tema)}</h4>
       <p class="module">${escapeHtml(aula.modulo_nome)}</p>
     </div>
-
-    <ul class="meta">
-      <li><strong>Próxima ação:</strong> ${escapeHtml(aula.proxima_acao)}</li>
-      <li><strong>PDFs:</strong> ${aula.pdfs.baixados}/${aula.pdfs.total}</li>
-    </ul>
-
-    <div class="card-actions">
-      <button class="btn next-action ${nextClass}" data-action="${nextRoute}" data-id="${aula.id}">Executar próxima ação</button>
-      <button class="btn secondary" data-action="voltar-etapa" data-id="${aula.id}">Voltar etapa</button>
-      <button class="btn secondary" data-drive-action="list-files" data-id="${aula.id}">Listar Drive</button>
-      <button class="btn secondary" data-drive-action="upload-file" data-id="${aula.id}">Upload Drive</button>
-      <button class="btn secondary" data-detail="${aula.id}">Detalhes</button>
-    </div>
   `;
 
-  card.querySelector("[data-detail]").addEventListener("click", () => openDetail(aula.id));
+  const stateBlocks = renderCardStateBlock(aula);
+  const actionsHtml = renderCardActions(aula);
+
+  card.innerHTML = `
+    ${headerHtml}
+    ${stateBlocks}
+    <div class="card-actions">${actionsHtml}</div>
+  `;
+
+  attachCardHandlers(card, aula);
+  return card;
+}
+
+function renderCardStateBlock(aula) {
+  if (aula.status === "bibliografia_em_geracao") {
+    const msg = aula.progresso || "Iniciando…";
+    return `
+      <div class="card-progress">
+        <div class="spinner"></div>
+        <div>
+          <p class="progress-label">Em execução</p>
+          <p class="progress-msg">${escapeHtml(msg)}</p>
+        </div>
+      </div>
+    `;
+  }
+  if (aula.status === "erro_bloqueada") {
+    const pend = (aula.pendencias || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
+    return `<div class="card-error"><strong>Falha:</strong><ul>${pend || "<li>Sem detalhes.</li>"}</ul></div>`;
+  }
+
+  const pdfLine = `PDFs: <strong>${aula.pdfs.baixados}/${aula.pdfs.total}</strong>`;
+  const nextLine = `Próxima: <strong>${escapeHtml(aula.proxima_acao)}</strong>`;
+  return `<ul class="meta"><li>${nextLine}</li><li>${pdfLine}</li></ul>`;
+}
+
+function renderCardActions(aula) {
+  const buttons = [];
+
+  switch (aula.status) {
+    case "proximas_aulas":
+      buttons.push(actionBtn("gerar-bibliografia", "Gerar bibliografia", "color-biblio"));
+      break;
+
+    case "bibliografia_em_geracao":
+      buttons.push(`<button class="btn secondary" data-action="voltar-etapa" data-id="${aula.id}">Cancelar (voltar)</button>`);
+      break;
+
+    case "bibliografia_pronta":
+      buttons.push(linksBtn(aula, "Abrir todos os links"));
+      buttons.push(actionBtn("marcar-pdfs-baixados", "PDFs baixados", "color-pdf"));
+      break;
+
+    case "pdfs_baixados":
+      buttons.push(editorBtn(aula, "Colar texto do NotebookLM", "color-texto"));
+      break;
+
+    case "texto_feito":
+      buttons.push(editorBtn(aula, "Editar texto", "color-texto"));
+      buttons.push(actionBtn("concluir-edicao", "Concluir edição", "color-aprovar"));
+      break;
+
+    case "texto_editado":
+      buttons.push(editorBtn(aula, "Ver/editar texto", "color-default"));
+      buttons.push(actionBtn("gerar-pptx", "Gerar PPTX", "color-pptx"));
+      break;
+
+    case "pptx_gerado":
+      buttons.push(pptxBtn(aula, "Abrir PPTX no Drive"));
+      buttons.push(actionBtn("marcar-imagens-prontas", "Imagens prontas", "color-aprovar"));
+      break;
+
+    case "pptx_finalizado":
+      buttons.push(pptxBtn(aula, "Abrir PPTX"));
+      buttons.push(actionBtn("mover-pptx-final", "Mover para pasta final", "color-concluir"));
+      break;
+
+    case "pptx_na_pasta_final":
+      buttons.push(pptxBtn(aula, "Abrir PPTX"));
+      break;
+
+    case "erro_bloqueada":
+      buttons.push(`<button class="btn secondary" data-action="voltar-etapa" data-id="${aula.id}">Voltar etapa</button>`);
+      break;
+  }
+
+  buttons.push(`<button class="btn ghost" data-detail="${aula.id}">Detalhes</button>`);
+  return buttons.join("");
+}
+
+function actionBtn(route, label, colorClass = "color-default") {
+  return `<button class="btn next-action ${colorClass}" data-action="${route}">${escapeHtml(label)}</button>`;
+}
+
+function editorBtn(aula, label, colorClass = "color-texto") {
+  return `<button class="btn next-action ${colorClass}" data-editor="${aula.id}">${escapeHtml(label)}</button>`;
+}
+
+function linksBtn(aula, label) {
+  return `<button class="btn primary" data-open-all="${aula.id}">${escapeHtml(label)}</button>`;
+}
+
+function pptxBtn(aula, label) {
+  const url = aula.arquivos?.pptx_web_view_link || "";
+  if (!url) {
+    return `<button class="btn secondary" data-drive-action="locate-pptx" data-id="${aula.id}">Localizar PPTX</button>`;
+  }
+  return `<a class="btn secondary" href="${escapeAttr(url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+}
+
+function attachCardHandlers(card, aula) {
+  card.querySelectorAll("[data-detail]").forEach((btn) => {
+    btn.addEventListener("click", () => openDetail(aula.id));
+  });
   card.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       const target = e.currentTarget;
-      await runAction(target.dataset.id, target.dataset.action);
+      await runAction(aula.id, target.dataset.action);
     });
+  });
+  card.querySelectorAll("[data-editor]").forEach((btn) => {
+    btn.addEventListener("click", () => openTextEditor(aula));
+  });
+  card.querySelectorAll("[data-open-all]").forEach((btn) => {
+    btn.addEventListener("click", () => openLinksInTabs(collectAllLinks(aula)));
   });
   card.querySelectorAll("[data-drive-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       const target = e.currentTarget;
-      await handleDriveAction(target.dataset.id, target.dataset.driveAction, true);
+      const action = target.dataset.driveAction;
+      if (action === "locate-pptx") {
+        await listDriveFilesForAula(aula.id, false);
+        showToast("Listagem de arquivos atualizada — verifique nos detalhes da aula.");
+      }
     });
   });
-
-  return card;
 }
+
+// ---------------------------------------------------------------------------
+// Editor de texto inline
+// ---------------------------------------------------------------------------
+
+async function openTextEditor(aula) {
+  if (!apiAvailable) {
+    showToast("Editor indisponível no GitHub Pages (modo somente leitura).", true);
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "editor-overlay";
+  overlay.innerHTML = `
+    <div class="editor-modal">
+      <header>
+        <h3>${escapeHtml(aula.id)} · ${escapeHtml(aula.aula_tema)}</h3>
+        <button class="btn ghost" data-editor-close>Fechar</button>
+      </header>
+      <div class="editor-loading">Carregando texto do Drive…</div>
+      <textarea class="editor-textarea" placeholder="Cole aqui o texto do NotebookLM, ou edite o existente." hidden></textarea>
+      <footer>
+        <span class="editor-hint">O texto é gravado em <code>04_aula_texto.md</code> no Drive.</span>
+        <div class="editor-actions">
+          <button class="btn secondary" data-editor-save>Salvar</button>
+          <button class="btn primary" data-editor-save-advance>Salvar e avançar</button>
+        </div>
+      </footer>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const closeBtn = overlay.querySelector("[data-editor-close]");
+  const textarea = overlay.querySelector(".editor-textarea");
+  const loadingEl = overlay.querySelector(".editor-loading");
+  const saveBtn = overlay.querySelector("[data-editor-save]");
+  const saveAdvanceBtn = overlay.querySelector("[data-editor-save-advance]");
+
+  const close = () => overlay.remove();
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aula.id)}/texto`);
+    const payload = await res.json();
+    textarea.value = payload.conteudo || "";
+  } catch (err) {
+    showToast(`Erro ao carregar texto: ${err.message}`, true);
+  } finally {
+    loadingEl.remove();
+    textarea.hidden = false;
+    textarea.focus();
+  }
+
+  const saveOnly = async () => {
+    saveBtn.disabled = true;
+    saveAdvanceBtn.disabled = true;
+    try {
+      await saveTexto(aula.id, textarea.value);
+      showToast("Texto salvo no Drive.");
+    } catch (err) {
+      showToast(`Erro ao salvar: ${err.message}`, true);
+    } finally {
+      saveBtn.disabled = false;
+      saveAdvanceBtn.disabled = false;
+    }
+  };
+
+  const saveAndAdvance = async () => {
+    saveBtn.disabled = true;
+    saveAdvanceBtn.disabled = true;
+    try {
+      await saveTexto(aula.id, textarea.value);
+      // Disparar action de transição correspondente ao status atual.
+      const nextRoute = nextRouteAfterEditor(aula.status);
+      if (nextRoute) {
+        await runAction(aula.id, nextRoute, false);
+      }
+      showToast("Texto salvo e aula avançada.");
+      close();
+    } catch (err) {
+      showToast(`Erro: ${err.message}`, true);
+      saveBtn.disabled = false;
+      saveAdvanceBtn.disabled = false;
+    }
+  };
+
+  saveBtn.addEventListener("click", saveOnly);
+  saveAdvanceBtn.addEventListener("click", saveAndAdvance);
+}
+
+function nextRouteAfterEditor(currentStatus) {
+  if (currentStatus === "pdfs_baixados") return "salvar-texto-inicial";
+  if (currentStatus === "texto_feito") return "concluir-edicao";
+  return null; // texto_editado e além: só salva, não avança.
+}
+
+async function saveTexto(aulaId, conteudo) {
+  const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/texto`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conteudo }),
+  });
+  const payload = await res.json();
+  if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha ao salvar");
+  return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Detalhes (modal lateral)
+// ---------------------------------------------------------------------------
 
 function closeDetail() {
   detailEl.classList.add("hidden");
@@ -227,37 +423,37 @@ function openDetail(aulaId) {
   selectedAulaId = aulaId;
   const aula = state.aulas.find((a) => a.id === aulaId);
   if (!aula) return;
-
   detailTitleEl.textContent = `${aula.id} · ${aula.aula_tema}`;
   detailContentEl.innerHTML = buildDetailHtml(aula);
   detailEl.classList.remove("hidden");
 
   for (const btn of detailContentEl.querySelectorAll("[data-action]")) {
     btn.addEventListener("click", async (e) => {
-      const target = e.currentTarget;
-      await runAction(aula.id, target.dataset.action);
+      await runAction(aula.id, e.currentTarget.dataset.action);
     });
   }
   for (const btn of detailContentEl.querySelectorAll("[data-drive-action]")) {
     btn.addEventListener("click", async (e) => {
-      const target = e.currentTarget;
-      await handleDriveAction(aula.id, target.dataset.driveAction, false);
+      const action = e.currentTarget.dataset.driveAction;
+      if (action === "list-files") await listDriveFilesForAula(aula.id, false);
+      if (action === "upload-file") await uploadFileForAula(aula.id, false);
     });
   }
   const openAllBtn = detailContentEl.querySelector("[data-open-all]");
   if (openAllBtn) {
-    openAllBtn.addEventListener("click", () => {
-      openLinksInTabs(collectAllLinks(aula));
-    });
+    openAllBtn.addEventListener("click", () => openLinksInTabs(collectAllLinks(aula)));
   }
   for (const btn of detailContentEl.querySelectorAll("[data-open-group]")) {
     btn.addEventListener("click", (e) => {
-      const target = e.currentTarget;
-      const groupKey = target.dataset.openGroup;
+      const groupKey = e.currentTarget.dataset.openGroup;
       const groups = collectBibliografiaGroups(aula);
       const grupo = groups.find((g) => g.key === groupKey);
       openLinksInTabs(grupo ? grupo.links : []);
     });
+  }
+  const editorBtnEl = detailContentEl.querySelector("[data-editor]");
+  if (editorBtnEl) {
+    editorBtnEl.addEventListener("click", () => openTextEditor(aula));
   }
 }
 
@@ -270,19 +466,18 @@ function buildDetailHtml(aula) {
     ? `<ul>${aula.pdfs.nomes.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>`
     : "<p>Nenhum PDF encontrado na pasta 03_pdfs_artigos.</p>";
 
-  const nextRoute = NEXT_ACTION_TO_ROUTE[aula.proxima_acao] || "abrir-pasta";
-  const actions = ACTIONS.map((a) => {
-    const isNext = a.route === nextRoute;
-    const cls = isNext ? `btn next-action ${getActionColorClass(a.route)}` : "btn secondary";
-    return `<button class="${cls}" data-action="${a.route}">${a.label}</button>`;
-  }).join("");
-
   const preview = aula.texto_preview
     ? `<p class="preview">${escapeHtml(aula.texto_preview)}</p>`
     : "<p>Texto da aula ainda não disponível.</p>";
-  const aiArtifacts = aula.ai_artifacts && Object.keys(aula.ai_artifacts).length
-    ? `<ul>${Object.keys(aula.ai_artifacts).map((k) => `<li>${escapeHtml(k)}</li>`).join("")}</ul>`
-    : "<p>Nenhum artefato de IA salvo.</p>";
+
+  const pptxLink = aula.arquivos?.pptx_web_view_link
+    ? `<p><a href="${escapeAttr(aula.arquivos.pptx_web_view_link)}" target="_blank" rel="noopener">Abrir PPTX no Drive</a></p>`
+    : "<p>PPTX ainda não localizado.</p>";
+
+  const editorBtn = ["pdfs_baixados", "texto_feito", "texto_editado"].includes(aula.status)
+    ? `<button class="btn next-action color-texto" data-editor="${aula.id}">Abrir editor de texto</button>`
+    : "";
+
   const bibliografia = renderBibliografiaSection(aula);
 
   return `
@@ -308,16 +503,17 @@ function buildDetailHtml(aula) {
     </section>
 
     <section>
-      <h3>Preview do texto</h3>
+      <h3>Texto da aula</h3>
       ${preview}
+      ${editorBtn}
+    </section>
+
+    <section>
+      <h3>PPTX</h3>
+      ${pptxLink}
     </section>
 
     ${bibliografia}
-
-    <section>
-      <h3>Artefatos IA</h3>
-      ${aiArtifacts}
-    </section>
 
     <section>
       <h3>Drive</h3>
@@ -330,13 +526,17 @@ function buildDetailHtml(aula) {
     </section>
 
     <section>
-      <h3>Ações</h3>
-      <div class="actions-wrap">${actions}</div>
+      <h3>Ações manuais</h3>
+      <div class="actions-wrap">
+        <button class="btn secondary" data-action="avancar-etapa">Avançar etapa</button>
+        <button class="btn secondary" data-action="voltar-etapa">Voltar etapa</button>
+        <button class="btn secondary" data-action="abrir-pasta">Abrir pasta local</button>
+      </div>
     </section>
   `;
 }
 
-async function runAction(aulaId, route) {
+async function runAction(aulaId, route, silent = false) {
   if (!apiAvailable) {
     showToast("Ações desabilitadas no GitHub Pages (modo somente leitura).", true);
     return;
@@ -347,17 +547,13 @@ async function runAction(aulaId, route) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note: "ação via dashboard" }),
     });
-
     const payload = await res.json();
-
-    if (!res.ok || !payload.ok) {
-      throw new Error(payload.message || payload.detail || "Falha na ação");
-    }
-
-    showToast(payload.message || "Ação executada.");
+    if (!res.ok || !payload.ok) throw new Error(payload.message || payload.detail || "Falha na ação");
+    if (!silent) showToast(payload.message || "Ação executada.");
     await loadAll(false);
   } catch (err) {
-    showToast(`Erro: ${err.message}`, true);
+    if (!silent) showToast(`Erro: ${err.message}`, true);
+    throw err;
   }
 }
 
@@ -373,13 +569,9 @@ async function runDriveBootstrap() {
       headers: { "Content-Type": "application/json" },
     });
     const payload = await res.json();
-    if (!res.ok || !payload.ok) {
-      throw new Error(payload.message || payload.detail || "Falha no bootstrap do Drive");
-    }
+    if (!res.ok || !payload.ok) throw new Error(payload.message || payload.detail || "Falha no bootstrap");
     const summary = payload.summary || {};
-    showToast(
-      `Drive bootstrap OK: módulos ${summary.modules_touched ?? 0}, aulas ${summary.aulas_touched ?? 0}.`
-    );
+    showToast(`Drive bootstrap OK: módulos ${summary.modules_touched ?? 0}, aulas ${summary.aulas_touched ?? 0}.`);
     await loadAll(false);
   } catch (err) {
     showToast(`Erro Drive bootstrap: ${err.message}`, true);
@@ -388,70 +580,36 @@ async function runDriveBootstrap() {
   }
 }
 
-async function handleDriveAction(aulaId, driveAction, fromCard = false) {
-  if (driveAction === "list-files") {
-    await listDriveFilesForAula(aulaId, fromCard);
-    return;
-  }
-  if (driveAction === "upload-file") {
-    await uploadFileForAula(aulaId, fromCard);
-    return;
-  }
-}
-
 async function listDriveFilesForAula(aulaId, forceOpenDetail = false) {
-  if (!apiAvailable) {
-    showToast("Drive indisponível no GitHub Pages (modo somente leitura).", true);
-    return;
-  }
-  if (forceOpenDetail && selectedAulaId !== aulaId) {
-    openDetail(aulaId);
-  }
+  if (!apiAvailable) return;
+  if (forceOpenDetail && selectedAulaId !== aulaId) openDetail(aulaId);
   try {
     const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/drive-files`);
     const payload = await res.json();
-    if (!res.ok || !payload.ok) {
-      throw new Error(payload.message || payload.detail || "Falha ao listar arquivos no Drive");
-    }
-
+    if (!res.ok || !payload.ok) throw new Error(payload.message || payload.detail || "Falha");
     driveFilesCache.set(aulaId, payload.files || []);
     showToast(`Drive: ${payload.count ?? (payload.files || []).length} arquivo(s) para ${aulaId}.`);
-
-    if (selectedAulaId === aulaId) {
-      openDetail(aulaId);
-    }
+    if (selectedAulaId === aulaId) openDetail(aulaId);
   } catch (err) {
     showToast(`Erro listagem Drive: ${err.message}`, true);
   }
 }
 
 async function uploadFileForAula(aulaId, forceOpenDetail = false) {
-  if (!apiAvailable) {
-    showToast("Upload indisponível no GitHub Pages (modo somente leitura).", true);
-    return;
-  }
+  if (!apiAvailable) return;
   const aula = state?.aulas?.find((item) => item.id === aulaId);
-  if (!aula) {
-    showToast("Aula não encontrada no estado atual.", true);
-    return;
-  }
-  if (forceOpenDetail && selectedAulaId !== aulaId) {
-    openDetail(aulaId);
-  }
+  if (!aula) return;
+  if (forceOpenDetail && selectedAulaId !== aulaId) openDetail(aulaId);
 
   const file = await pickFileFromUser();
   if (!file) return;
 
   const targetSubfolder = window.prompt(
-    "Subpasta destino no Drive (opcional): 01_bibliografia, 02_livros_extraidos, 03_pdfs_artigos. Deixe vazio para raiz da aula.",
+    "Subpasta destino no Drive (opcional): 01_bibliografia, 02_livros_extraidos, 03_pdfs_artigos, 04_aula_texto. Deixe vazio para raiz da aula.",
     ""
   );
   if (targetSubfolder === null) return;
-
-  const targetName = window.prompt(
-    "Nome final do arquivo no Drive (opcional). Deixe vazio para usar o nome local.",
-    ""
-  );
+  const targetName = window.prompt("Nome final do arquivo (opcional).", "");
   if (targetName === null) return;
 
   const formData = new FormData();
@@ -465,16 +623,17 @@ async function uploadFileForAula(aulaId, forceOpenDetail = false) {
       body: formData,
     });
     const data = await res.json();
-    if (!res.ok || !data.ok) {
-      throw new Error(data.message || data.detail || "Falha no upload para Drive");
-    }
-    const uploadedName = data.file?.name || "arquivo";
-    showToast(`Upload concluído (${aulaId}): ${uploadedName}`);
+    if (!res.ok || !data.ok) throw new Error(data.message || data.detail || "Falha no upload");
+    showToast(`Upload OK (${aulaId}): ${data.file?.name || "arquivo"}`);
     await listDriveFilesForAula(aulaId, false);
   } catch (err) {
     showToast(`Erro upload Drive: ${err.message}`, true);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Bibliografia — links
+// ---------------------------------------------------------------------------
 
 const BIBLIO_SOURCES = [
   { key: "diretrizes_consensos.md", label: "Diretrizes e Consensos" },
@@ -486,28 +645,22 @@ const BIBLIO_SOURCES = [
 function renderBibliografiaSection(aula) {
   const groups = collectBibliografiaGroups(aula);
   const total = groups.reduce((n, g) => n + g.links.length, 0);
-  if (!total) {
-    return "";
-  }
+  if (!total) return "";
 
   const groupsHtml = groups
     .filter((g) => g.links.length)
     .map((g) => {
       const items = g.links
         .map(
-          (l, i) =>
-            `<li><a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(
-              l.title || l.url
-            )}</a>${l.meta ? ` <span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}</li>`
+          (l) =>
+            `<li><a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>${l.meta ? ` <span class="biblio-meta">${escapeHtml(l.meta)}</span>` : ""}</li>`
         )
         .join("");
       return `
         <div class="biblio-group">
           <div class="biblio-group-head">
             <h4>${escapeHtml(g.label)} <span class="biblio-count">${g.links.length}</span></h4>
-            <button class="btn ghost" data-open-group="${escapeAttr(g.key)}" data-id="${escapeAttr(
-        aula.id
-      )}">Abrir esta fonte</button>
+            <button class="btn ghost" data-open-group="${escapeAttr(g.key)}">Abrir esta fonte</button>
           </div>
           <ul class="biblio-list">${items}</ul>
         </div>`;
@@ -520,7 +673,7 @@ function renderBibliografiaSection(aula) {
         <h3>Bibliografia · ${total} links</h3>
         <button class="btn primary" data-open-all="${escapeAttr(aula.id)}">Abrir todos os links</button>
       </div>
-      <p class="biblio-hint">Cada link abre em uma nova aba. Se o navegador bloquear popups, permita-os para este site uma vez.</p>
+      <p class="biblio-hint">Se o navegador bloquear popups, autorize popups para este site (cadeado da URL → Permissões → Pop-ups → Permitir).</p>
       ${groupsHtml}
     </section>
   `;
@@ -561,7 +714,6 @@ function extractLinksFromMarkdown(md) {
     const url = (match[2] || "").trim();
     if (!url || seen.has(url)) continue;
     seen.add(url);
-    // Captura meta depois do link: " — 2024 · NEJM · Practice Guideline" ou " · PDF"
     const tail = md.slice(match.index + match[0].length, match.index + match[0].length + 240);
     const metaMatch = tail.match(/^\s*[—\-]\s*([^\n]+?)(?=\n|$)/);
     const pdfMatch = tail.match(/^\s*·\s*(PDF)(?=\b|\s|$)/);
@@ -587,7 +739,7 @@ function openLinksInTabs(links) {
   }
   if (blocked > 0) {
     showToast(
-      `Abertas ${opened} de ${links.length} abas. ${blocked} bloqueadas pelo navegador — autorize popups para este site.`,
+      `${opened}/${links.length} abertas. ${blocked} bloqueadas — clique no cadeado da URL → Permissões → Pop-ups → Permitir, e tente de novo.`,
       true
     );
   } else {
@@ -600,21 +752,12 @@ function escapeAttr(value) {
 }
 
 function renderDriveFilesSection(aulaId) {
-  if (!driveFilesCache.has(aulaId)) {
-    return "<p>Sem listagem carregada. Clique em \"Listar arquivos Drive\".</p>";
-  }
+  if (!driveFilesCache.has(aulaId)) return "<p>Sem listagem carregada. Clique em \"Listar arquivos Drive\".</p>";
   const files = driveFilesCache.get(aulaId) || [];
-  if (!files.length) {
-    return "<p>Sem arquivos encontrados para esta aula no Drive.</p>";
-  }
-
+  if (!files.length) return "<p>Sem arquivos encontrados para esta aula no Drive.</p>";
   const items = files
-    .map((f) => {
-      const parentLabel = f.parentLabel ? ` (${escapeHtml(f.parentLabel)})` : "";
-      return `<li>${escapeHtml(f.name)}${parentLabel}</li>`;
-    })
+    .map((f) => `<li>${escapeHtml(f.name)}${f.parentLabel ? ` (${escapeHtml(f.parentLabel)})` : ""}</li>`)
     .join("");
-
   return `<ul class="drive-files-list">${items}</ul>`;
 }
 
@@ -632,36 +775,17 @@ function showToast(message, isError = false) {
   toastEl.classList.remove("hidden", "error");
   if (isError) toastEl.classList.add("error");
   clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(() => toastEl.classList.add("hidden"), 3200);
+  showToast._timer = setTimeout(() => toastEl.classList.add("hidden"), 4200);
 }
 
 loadAll(false);
-
-function getActionColorClass(route) {
-  const map = {
-    "gerar-bibliografia": "color-biblio",
-    "aprovar-bibliografia": "color-aprovar",
-    "marcar-pdfs": "color-pdf",
-    "gerar-texto": "color-texto",
-    "enviar-revisao": "color-revisao",
-    "gerar-pptx": "color-pptx",
-    "concluir": "color-concluir",
-    "abrir-pasta": "color-pasta",
-    "avancar-etapa": "color-avancar",
-    "voltar-etapa": "color-voltar",
-  };
-  return map[route] || "color-default";
-}
 
 function populateModuleFilter() {
   const previous = moduleFilterEl.value;
   const moduleMap = new Map();
   for (const aula of state.aulas) {
-    if (!moduleMap.has(aula.modulo_num)) {
-      moduleMap.set(aula.modulo_num, aula.modulo_nome);
-    }
+    if (!moduleMap.has(aula.modulo_num)) moduleMap.set(aula.modulo_num, aula.modulo_nome);
   }
-
   moduleFilterEl.innerHTML = '<option value="">Todos</option>';
   Array.from(moduleMap.entries())
     .sort((a, b) => a[0] - b[0])
@@ -671,7 +795,6 @@ function populateModuleFilter() {
       opt.textContent = `M${num} - ${nome}`;
       moduleFilterEl.appendChild(opt);
     });
-
   if (previous && moduleMap.has(Number(previous))) {
     moduleFilterEl.value = previous;
     filters.module = previous;
@@ -682,7 +805,6 @@ function getFilteredAulas() {
   if (!state?.aulas?.length) return [];
   const module = filters.module?.trim();
   const theme = normalizeText(filters.theme || "");
-
   return state.aulas.filter((aula) => {
     const okModule = !module || String(aula.modulo_num) === module;
     const okTheme =
@@ -697,30 +819,24 @@ function getFilteredAulas() {
 function normalizeText(v) {
   return String(v || "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .trim();
 }
 
 function resolveApiBase() {
   const defaultCloudRunApi = "https://gineco-api-468351448933.us-central1.run.app";
-
   const byWindow = String(window.KANBAN_API_BASE || "").trim();
   if (byWindow) return byWindow.replace(/\/$/, "");
-
   const fromQuery = new URLSearchParams(window.location.search).get("api_base");
   if (fromQuery && fromQuery.trim()) {
     const normalized = fromQuery.trim().replace(/\/$/, "");
     window.localStorage.setItem("kanban_api_base", normalized);
     return normalized;
   }
-
   const fromStorage = window.localStorage.getItem("kanban_api_base");
   if (fromStorage && fromStorage.trim()) return fromStorage.trim().replace(/\/$/, "");
-
-  if (window.location.hostname.endsWith("github.io")) {
-    return defaultCloudRunApi;
-  }
+  if (window.location.hostname.endsWith("github.io")) return defaultCloudRunApi;
   return "";
 }
 
@@ -749,9 +865,7 @@ async function tryLoadStaticFallback() {
     populateModuleFilter();
     renderStats();
     renderBoard();
-    if (selectedAulaId) {
-      openDetail(selectedAulaId);
-    }
+    if (selectedAulaId) openDetail(selectedAulaId);
     showToast("Modo GitHub Pages: visualização estática carregada.");
     return true;
   } catch (_) {

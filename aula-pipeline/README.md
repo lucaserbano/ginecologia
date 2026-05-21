@@ -36,16 +36,18 @@ python3 -m uvicorn server:app --reload --host 127.0.0.1 --port 8787
 4. Abra no navegador:
 - `http://127.0.0.1:8787/`
 
-## Endpoints v1
+## Endpoints v2
 - `GET /api/aulas`
 - `GET /api/aulas/{id}`
-- `POST /api/aulas/{id}/actions/gerar-bibliografia`
-- `POST /api/aulas/{id}/actions/aprovar-bibliografia`
-- `POST /api/aulas/{id}/actions/marcar-pdfs`
-- `POST /api/aulas/{id}/actions/gerar-texto`
-- `POST /api/aulas/{id}/actions/enviar-revisao`
+- `GET /api/aulas/{id}/texto` (lê `04_aula_texto.md` do Drive)
+- `PUT /api/aulas/{id}/texto` (grava `04_aula_texto.md` no Drive)
+- `POST /api/aulas/{id}/actions/gerar-bibliografia` (assíncrono — flipa para `bibliografia_em_geracao` e dispara worker)
+- `POST /api/aulas/{id}/actions/marcar-pdfs-baixados`
+- `POST /api/aulas/{id}/actions/salvar-texto-inicial`
+- `POST /api/aulas/{id}/actions/concluir-edicao`
 - `POST /api/aulas/{id}/actions/gerar-pptx`
-- `POST /api/aulas/{id}/actions/concluir`
+- `POST /api/aulas/{id}/actions/marcar-imagens-prontas`
+- `POST /api/aulas/{id}/actions/mover-pptx-final`
 - `POST /api/aulas/{id}/actions/abrir-pasta`
 - `POST /api/aulas/{id}/actions/avancar-etapa`
 - `POST /api/aulas/{id}/actions/voltar-etapa`
@@ -74,18 +76,14 @@ O backend suporta execução real de IA ao clicar nas ações do Kanban.
 Backend padrão: `vertex` (Gemini no Google Cloud). Fallback opcional: `openrouter`.
 
 ### Como funciona
-- `gerar-bibliografia`: gera bibliografia e marca `bibliografia_pronta`.
-- `gerar-texto`: gera texto da aula e marca `texto_pronto_revisao`.
-- `enviar-revisao`: revisa o texto e marca `texto_revisado`.
-- `gerar-pptx`: 1ª execução gera outline e marca `slides_em_producao`; 2ª execução marca `pptx_pronto`.
+- `gerar-bibliografia`: ação **assíncrona**. Flipa a aula para `bibliografia_em_geracao` imediatamente, dispara worker (`BackgroundTasks` do FastAPI) e ao final marca `bibliografia_pronta`. Em caso de erro, marca `erro_bloqueada`. O progresso aparece em `progresso` no JSON da aula (lido pelo frontend para mostrar substep atual: PubMed → UpToDate → Diretrizes → Livros).
+- `gerar-pptx`: gera `05_outline_slides.md` a partir do texto editado no Drive e marca `pptx_gerado` (outline-only por enquanto, montagem `.pptx` real ainda não implementada).
 
-Os artefatos ficam no estado da aula em `ai_artifacts` (JSON) e, quando possível, também são gravados como arquivos Markdown e enviados automaticamente ao Drive.
+Texto da aula (`04_aula_texto.md`) é editado diretamente no dashboard e gravado no Drive via `PUT /api/aulas/{id}/texto`.
 
 ### Artefatos automáticos
 - `gerar-bibliografia`: executa a fase 1, gerando `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md` e `01_bibliografia.md`; extrai capítulos de livros para `02_livros_extraidos` quando os PDFs estão disponíveis no Drive.
-- `gerar-texto`: prioriza bibliografia em `01_bibliografia` no Drive (com fallback para estado interno), gera `04_aula_texto.md`, grava local quando possível e envia ao Drive em `04_aula_texto`.
-- `enviar-revisao`: prioriza `04_aula_texto.md` do Drive (com fallback para estado interno), gera `06_revisao.md`, grava local quando possível e envia ao Drive em `06_revisao`.
-- `gerar-pptx`: por enquanto gera `05_outline_slides.md`, grava na raiz local da aula quando disponível e envia ao Drive em `05_outline_slides`.
+- `gerar-pptx`: gera `05_outline_slides.md` a partir do texto da aula (Drive) e envia ao Drive em `05_outline_slides`.
 
 As ações usam os prompts-base em `agents/*.md` quando esses arquivos estão disponíveis no ambiente. Para Cloud Run, use o deploy pelo Dockerfile da raiz do repositório para incluir `agents/` e `aulas/templates/` na imagem.
 

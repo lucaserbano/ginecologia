@@ -10,27 +10,23 @@ StatusKey = Literal[
     "proximas_aulas",
     "bibliografia_em_geracao",
     "bibliografia_pronta",
-    "aguardando_aprovacao_fontes",
-    "aguardando_pdfs",
-    "pdfs_adicionados",
-    "texto_em_producao",
-    "texto_pronto_revisao",
-    "texto_revisado",
-    "slides_em_producao",
-    "pptx_pronto",
-    "revisao_final",
-    "concluida",
+    "pdfs_baixados",
+    "texto_feito",
+    "texto_editado",
+    "pptx_gerado",
+    "pptx_finalizado",
+    "pptx_na_pasta_final",
     "erro_bloqueada",
 ]
 
 ACTION_KEY_BY_ROUTE = {
     "gerar-bibliografia": "gerar_bibliografia",
-    "aprovar-bibliografia": "aprovar_bibliografia",
-    "marcar-pdfs": "marcar_pdfs",
-    "gerar-texto": "gerar_texto",
-    "enviar-revisao": "enviar_revisao",
+    "marcar-pdfs-baixados": "marcar_pdfs_baixados",
+    "salvar-texto-inicial": "salvar_texto_inicial",
+    "concluir-edicao": "concluir_edicao",
     "gerar-pptx": "gerar_pptx",
-    "concluir": "concluir",
+    "marcar-imagens-prontas": "marcar_imagens_prontas",
+    "mover-pptx-final": "mover_pptx_final",
     "abrir-pasta": "abrir_pasta",
     "avancar-etapa": "avancar_etapa",
     "voltar-etapa": "voltar_etapa",
@@ -39,37 +35,29 @@ ACTION_KEY_BY_ROUTE = {
 STATUS_COLUMNS: list[tuple[StatusKey, str]] = [
     ("proximas_aulas", "Próximas aulas"),
     ("bibliografia_em_geracao", "Bibliografia em geração"),
-    ("bibliografia_pronta", "Bibliografia pronta"),
-    ("aguardando_aprovacao_fontes", "Aguardando aprovação das fontes"),
-    ("aguardando_pdfs", "Aguardando PDFs"),
-    ("pdfs_adicionados", "PDFs adicionados"),
-    ("texto_em_producao", "Texto em produção"),
-    ("texto_pronto_revisao", "Texto pronto para revisão"),
-    ("texto_revisado", "Texto revisado"),
-    ("slides_em_producao", "Slides em produção"),
-    ("pptx_pronto", "PPTX pronto"),
-    ("revisao_final", "Revisão final"),
-    ("concluida", "Concluída"),
+    ("bibliografia_pronta", "Bibliografia pronta para download"),
+    ("pdfs_baixados", "PDFs baixados"),
+    ("texto_feito", "Texto feito"),
+    ("texto_editado", "Texto editado"),
+    ("pptx_gerado", "PPTX gerado"),
+    ("pptx_finalizado", "PPTX finalizado"),
+    ("pptx_na_pasta_final", "PPTX na pasta final"),
     ("erro_bloqueada", "Erro / bloqueada"),
 ]
 
 STATUS_LABEL_MAP = {k: v for k, v in STATUS_COLUMNS}
-STATUS_FLOW: list[StatusKey] = [k for k, _ in STATUS_COLUMNS]
+STATUS_FLOW: list[StatusKey] = [k for k, _ in STATUS_COLUMNS if k != "erro_bloqueada"]
 
 NEXT_ACTION_BY_STATUS: dict[StatusKey, str] = {
     "proximas_aulas": "Gerar bibliografia",
-    "bibliografia_em_geracao": "Aprovar bibliografia",
-    "bibliografia_pronta": "Aprovar bibliografia",
-    "aguardando_aprovacao_fontes": "Aprovar bibliografia",
-    "aguardando_pdfs": "Marcar PDFs como baixados",
-    "pdfs_adicionados": "Gerar texto da aula",
-    "texto_em_producao": "Enviar para revisão",
-    "texto_pronto_revisao": "Enviar para revisão",
-    "texto_revisado": "Gerar PPTX",
-    "slides_em_producao": "Gerar PPTX",
-    "pptx_pronto": "Marcar como concluída",
-    "revisao_final": "Marcar como concluída",
-    "concluida": "Concluída",
+    "bibliografia_em_geracao": "Aguardando geração",
+    "bibliografia_pronta": "Marcar PDFs como baixados",
+    "pdfs_baixados": "Salvar texto do NotebookLM",
+    "texto_feito": "Concluir edição do texto",
+    "texto_editado": "Gerar PPTX",
+    "pptx_gerado": "Marcar imagens como prontas",
+    "pptx_finalizado": "Mover PPTX para pasta final",
+    "pptx_na_pasta_final": "Concluída",
     "erro_bloqueada": "Resolver bloqueio",
 }
 
@@ -87,8 +75,8 @@ class ArquivosAula(BaseModel):
     livros_extraidos_dir: Optional[str] = None
     artigos_dir: Optional[str] = None
     texto_aula: Optional[str] = None
-    revisao: Optional[str] = None
     pptx_final: Optional[str] = None
+    pptx_web_view_link: Optional[str] = None
 
 
 class PdfInfo(BaseModel):
@@ -117,6 +105,7 @@ class AulaItem(BaseModel):
     drive_folder_id: Optional[str] = None
     drive_subfolders: dict[str, str] = Field(default_factory=dict)
     ai_artifacts: dict[str, str] = Field(default_factory=dict)
+    progresso: Optional[str] = None
 
 
 class AulasState(BaseModel):
@@ -139,6 +128,16 @@ class DriveUploadRequest(BaseModel):
     local_relative_path: str
     target_subfolder: Optional[str] = None
     target_name: Optional[str] = None
+
+
+class TextoRequest(BaseModel):
+    conteudo: str
+
+
+class TextoResponse(BaseModel):
+    ok: bool
+    conteudo: str = ""
+    fonte: Literal["drive", "vazio"] = "vazio"
 
 
 class ColumnsResponse(BaseModel):

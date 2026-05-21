@@ -22,7 +22,6 @@ ARTIFACT_TARGETS = {
     "uptodate.md": {"local_dir": "01_bibliografia", "drive_dir": "01_bibliografia"},
     "04_aula_texto.md": {"local_dir": None, "drive_dir": "04_aula_texto"},
     "05_outline_slides.md": {"local_dir": None, "drive_dir": "05_outline_slides"},
-    "06_revisao.md": {"local_dir": None, "drive_dir": "06_revisao"},
 }
 
 
@@ -139,8 +138,6 @@ def _update_aula_file_pointers(aula: AulaItem, filename: str, path: Path) -> Non
         aula.arquivos.bibliografia_dir = _relative_or_absolute(path.parent)
     elif filename == "04_aula_texto.md":
         aula.arquivos.texto_aula = rel
-    elif filename == "06_revisao.md":
-        aula.arquivos.revisao = rel
 
 
 def _relative_or_absolute(path: Path) -> str:

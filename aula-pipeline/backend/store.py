@@ -55,10 +55,48 @@ def humanize_slug(slug: str) -> str:
     return " ".join(out)
 
 
+LEGACY_STATUS_MAP = {
+    # Fluxo antigo (pré-refactor de 9 colunas) -> novo.
+    "aguardando_aprovacao_fontes": "bibliografia_pronta",
+    "aguardando_pdfs": "bibliografia_pronta",
+    "pdfs_adicionados": "pdfs_baixados",
+    "texto_em_producao": "pdfs_baixados",
+    "texto_pronto_revisao": "texto_feito",
+    "texto_revisado": "texto_editado",
+    "slides_em_producao": "texto_editado",
+    "pptx_pronto": "pptx_gerado",
+    "revisao_final": "pptx_finalizado",
+    "concluida": "pptx_na_pasta_final",
+}
+
+
 def load_state() -> AulasState:
     if STATE_FILE.exists():
         raw = STATE_FILE.read_text(encoding="utf-8")
-        return AulasState.model_validate_json(raw)
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return AulasState(updated_at=now_utc(), aulas=[])
+        valid_statuses = {k for k, _ in __import__("schemas").STATUS_COLUMNS}
+
+        def _migrate(value):
+            if value in LEGACY_STATUS_MAP:
+                return LEGACY_STATUS_MAP[value]
+            if value not in valid_statuses:
+                return "proximas_aulas"
+            return value
+
+        for aula in payload.get("aulas", []):
+            aula["status"] = _migrate(aula.get("status"))
+            arquivos = aula.get("arquivos") or {}
+            arquivos.pop("revisao", None)
+            aula["arquivos"] = arquivos
+            for evento in aula.get("historico") or []:
+                if "de_status" in evento:
+                    evento["de_status"] = _migrate(evento.get("de_status"))
+                if "para_status" in evento:
+                    evento["para_status"] = _migrate(evento.get("para_status"))
+        return AulasState.model_validate(payload)
     return AulasState(updated_at=now_utc(), aulas=[])
 
 
@@ -129,8 +167,8 @@ def synchronize_with_filesystem(state: AulasState) -> AulasState:
                         "livros_extraidos_dir": _rel_or_none(paths["livros_extraidos_dir"]),
                         "artigos_dir": _rel_or_none(paths["artigos_dir"]),
                         "texto_aula": _rel_or_none(paths["texto_aula"]),
-                        "revisao": _rel_or_none(paths["revisao"]),
                         "pptx_final": _rel_or_none(paths["pptx_final"]),
+                        "pptx_web_view_link": prev.arquivos.pptx_web_view_link if prev else None,
                     },
                     texto_preview=texto_preview,
                     created_at=created_at,
@@ -154,7 +192,6 @@ def detect_aula_paths(aula_dir: Path) -> dict[str, Optional[Path]]:
     artigos_dir = aula_dir / "03_pdfs_artigos"
 
     texto_aula = aula_dir / "04_aula_texto.md"
-    revisao = aula_dir / "06_revisao.md"
 
     module_prefix = aula_dir.name.split("_", 2)
     pptx_candidate = None
@@ -166,7 +203,6 @@ def detect_aula_paths(aula_dir: Path) -> dict[str, Optional[Path]]:
         "livros_extraidos_dir": livros_extraidos_dir if livros_extraidos_dir.exists() else None,
         "artigos_dir": artigos_dir if artigos_dir.exists() else None,
         "texto_aula": texto_aula if texto_aula.exists() else None,
-        "revisao": revisao if revisao.exists() else None,
         "pptx_final": pptx_candidate if pptx_candidate and pptx_candidate.exists() else None,
     }
 

@@ -19,8 +19,9 @@ AULA_SUBFOLDERS = [
     "03_pdfs_artigos",
     "04_aula_texto",
     "05_outline_slides",
-    "06_revisao",
 ]
+
+PPTX_FINAIS_FOLDER_NAME = "PPTX finais"
 
 
 def _module_and_aula_folder_names(aula: AulaItem) -> tuple[str, str]:
@@ -260,6 +261,54 @@ def cleanup_duplicates_all(drive_service, state: AulasState, dry_run: bool = Fal
         "dry_run": dry_run,
         "per_aula": per_aula,
     }
+
+
+def find_pptx_in_aula_folder(drive_service, aula: AulaItem) -> Optional[dict]:
+    """Procura um arquivo .pptx na raiz da pasta da aula no Drive.
+    Retorna o item (com id, name, webViewLink) ou None."""
+    if not aula.drive_folder_id:
+        return None
+    for child in list_children(drive_service, aula.drive_folder_id):
+        if child.get("mimeType") == "application/vnd.google-apps.folder":
+            continue
+        name = (child.get("name") or "").lower()
+        if name.endswith(".pptx"):
+            return child
+    return None
+
+
+def move_pptx_to_modulo_final(drive_service, aula: AulaItem, drive_root_folder_id: str) -> dict:
+    """Move o .pptx da pasta da aula para a subpasta 'PPTX finais' do módulo.
+    Cria a subpasta se não existir. Retorna metadados do arquivo movido."""
+    if not aula.drive_folder_id:
+        raise ValueError("Aula sem drive_folder_id. Rode bootstrap do Drive primeiro.")
+
+    pptx = find_pptx_in_aula_folder(drive_service, aula)
+    if not pptx:
+        raise FileNotFoundError("Nenhum .pptx encontrado na pasta da aula.")
+
+    module_folder_name, _ = _module_and_aula_folder_names(aula)
+    modulo_folder = ensure_folder(drive_service, drive_root_folder_id, module_folder_name)
+    destino = ensure_folder(drive_service, modulo_folder["id"], PPTX_FINAIS_FOLDER_NAME)
+
+    file_id = pptx["id"]
+    current = drive_service.files().get(
+        fileId=file_id, fields="parents", supportsAllDrives=True
+    ).execute()
+    previous_parents = ",".join(current.get("parents", []))
+
+    updated = (
+        drive_service.files()
+        .update(
+            fileId=file_id,
+            addParents=destino["id"],
+            removeParents=previous_parents,
+            fields="id,name,parents,webViewLink",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    return updated
 
 
 def _aula_drive_ready(aula: AulaItem) -> bool:

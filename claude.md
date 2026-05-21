@@ -11,10 +11,9 @@ Seu objetivo e conduzir o fluxo de ponta a ponta sem inventar referencias.
 - Nao avance de fase sem criterio minimo de qualidade da fase anterior.
 
 ## Estrutura esperada
-- `agents/` (prompts dos agentes: curador-diretrizes-consensos, buscador-pubmed, curador-uptodate, indexador-livros, redator-aula, revisor-cientifico, montador-pptx)
+- `agents/` (prompts dos agentes: curador-diretrizes-consensos, buscador-pubmed, curador-uptodate, indexador-livros, redator-aula, montador-pptx)
 - `aulas/temas.md`
 - `aulas/templates/system_prompt_aula.md`
-- `aulas/templates/criterios_revisao.md`
 - `aulas_em_producao/modulos/<modulo>/<aula>/`
 - `aula-pipeline/` (Kanban: backend FastAPI + dashboard estatico)
 
@@ -26,35 +25,45 @@ Cada aula deve conter:
 - `03_pdfs_artigos/`
 - `04_aula_texto.md` (ou subpasta `04_aula_texto/`)
 - `05_outline_slides.md` (ou subpasta `05_outline_slides/`)
-- `06_revisao.md` (ou subpasta `06_revisao/`)
 - `M{X}_A{Y}.pptx`
 
-No Google Drive a estrutura espelha esse layout por subpastas (`01_bibliografia`, `02_livros_extraidos`, `03_pdfs_artigos`, `04_aula_texto`, `05_outline_slides`, `06_revisao`).
+No Google Drive a estrutura espelha esse layout por subpastas (`01_bibliografia`, `02_livros_extraidos`, `03_pdfs_artigos`, `04_aula_texto`, `05_outline_slides`). Quando a aula avanca para "PPTX na pasta final", o `.pptx` e movido para a subpasta `PPTX finais` do modulo (irma das pastas de aula).
 
-## Pipeline (fases)
-1. **Fase 1 - Bibliografia**: ler `aulas/temas.md`, selecionar modulo/aula, acionar `gerar-bibliografia` -> gera `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md`, `01_bibliografia.md` e extrai capitulos de livros para `02_livros_extraidos` quando ha PDF no Drive.
-   - Queries sao geradas por Gemini (`_generate_search_terms` em `phase1_bibliografia.py`): tema PT -> EN, query PubMed com MeSH, termos EN para UpToDate/ACOG/RCOG/FIGO/WHO/NAMS/ESHRE e termos PT para FEBRASGO/MS-CONITEC.
-   - PubMed: filtro `humans + 2019-3000 + (review|meta-analysis|RCT|practice guideline)`, com fallback sem filtro de tipo se < 3 resultados. Limite 5.
-   - UpToDate: limite 3, so links `/contents/`. Ranker prioriza tríade clinica (diagnosis/treatment/manifestations) e penaliza patient-education.
-   - Diretrizes:
-     - Nacionais (FEBRASGO, MS): `domain_search` via Google CSE (`GOOGLE_CSE_API_KEY`/`GOOGLE_CSE_CX` no Secret Manager) com fallback DuckDuckGo Lite.
-     - Internacionais (ACOG/RCOG/FIGO/WHO/NAMS/ESHRE): Gemini Pro sugere URLs canonicas + `_validate_url` (GET com Range, segue redirects, detecta soft-404 via markers `notfound|404|/error|page-not-found`) descarta alucinacoes.
-     - Limite total: 8.
-   - Output e em **lista markdown clicavel**, sem tabelas nem placeholders vazios.
-2. **Fase 2 - Texto**: aguardar PDFs em `03_pdfs_artigos/`, acionar `gerar-texto` -> gera `04_aula_texto.md` (le bibliografia do Drive como fonte primaria).
-3. **Fase 3 - Revisao**: acionar `enviar-revisao` -> gera `06_revisao.md` (le texto do Drive como fonte primaria).
-4. **Fase 4 - Slides**: acionar `gerar-pptx` 2x. 1a execucao gera `05_outline_slides.md` e move para `slides_em_producao`. 2a execucao marca `pptx_pronto`. Montagem PPTX real ainda nao implementada.
+## Pipeline (fases / colunas do Kanban)
+Colunas (status interno → label):
+1. `proximas_aulas` → "Proximas aulas"
+2. `bibliografia_em_geracao` → "Bibliografia em geracao"
+3. `bibliografia_pronta` → "Bibliografia pronta para download"
+4. `pdfs_baixados` → "PDFs baixados"
+5. `texto_feito` → "Texto feito" (NotebookLM colado no kanban)
+6. `texto_editado` → "Texto editado" (edicao inline pelo coordenador)
+7. `pptx_gerado` → "PPTX gerado" (outline gerado por IA)
+8. `pptx_finalizado` → "PPTX finalizado" (imagens adicionadas)
+9. `pptx_na_pasta_final` → "PPTX na pasta final" (movido para "PPTX finais" do modulo)
+
+Mais o estado lateral `erro_bloqueada` para falhas.
+
+**Fase 1 - Bibliografia (assincrona)**: acionar `gerar-bibliografia`. Flipa para `bibliografia_em_geracao` imediatamente e dispara `BackgroundTasks` que gera `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md`, `01_bibliografia.md` e extrai capitulos para `02_livros_extraidos`. Progresso aparece em `aula.progresso`. Ao terminar, marca `bibliografia_pronta`. Erro -> `erro_bloqueada`.
+   - Queries por Gemini (`_generate_search_terms`).
+   - PubMed: filtro `humans + 2019-3000 + (review|meta-analysis|RCT|practice guideline)`, limite 5, fallback sem filtro se < 3.
+   - UpToDate: 3 links `/contents/`, ranker prioriza diagnosis/treatment/manifestations.
+   - Diretrizes nacionais (FEBRASGO/MS): Google CSE + fallback DuckDuckGo. Internacionais: Gemini Pro + `_validate_url`. Limite total 8.
+
+**Fase 2 - Download e texto base (Eduardo)**: assistente baixa as referencias (botao "Abrir todos os links" no card), gera texto no NotebookLM, cola no editor do kanban e salva. Status: `bibliografia_pronta` -> `pdfs_baixados` -> `texto_feito`. Texto vai direto pro Drive em `04_aula_texto/04_aula_texto.md` via `PUT /api/aulas/{id}/texto`.
+
+**Fase 3 - Edicao (coordenador)**: editor inline no kanban. Mesma rota `PUT /texto` para salvar. Ao concluir edicao, status `texto_feito` -> `texto_editado`.
+
+**Fase 4 - PPTX**: `gerar-pptx` gera `05_outline_slides.md` a partir do texto editado e marca `pptx_gerado` (outline-only por enquanto; montagem `.pptx` real ainda nao implementada). Coordenador adiciona imagens manualmente no .pptx e clica "Marcar imagens prontas" (`pptx_finalizado`). Finalmente "Mover para pasta final" move o .pptx para a subpasta `PPTX finais` do modulo no Drive (`pptx_na_pasta_final`).
 
 Agentes-prompt usados pelas acoes:
-- `@curador-diretrizes-consensos.md`, `@buscador-pubmed.md`, `@curador-uptodate.md`, `@indexador-livros.md`
-- `@redator-aula.md`, `@revisor-cientifico.md`, `@montador-pptx.md`
+- `@curador-diretrizes-consensos.md`, `@buscador-pubmed.md`, `@curador-uptodate.md`, `@indexador-livros.md`, `@montador-pptx.md`
+- `@redator-aula.md` ainda esta no repo, mas nao e mais usado no fluxo atual (texto vem do NotebookLM).
 
 ## Criterios de saida
 - Referencias validadas e justificadas.
-- Texto com fluxo didatico, decisoes clinicas e citacoes.
+- Texto editado com fluxo didatico, decisoes clinicas e citacoes.
 - Outline de slides coerente com objetivo da aula.
-- Revisao com pendencias criticas zeradas.
-- PPTX final dentro do limite de slides definido no briefing.
+- PPTX final com imagens e dentro do limite de slides definido no briefing.
 
 ---
 
@@ -116,19 +125,20 @@ gcloud run services update gineco-api \
 
 ## Endpoints chave
 - `GET /api/aulas` / `GET /api/aulas/{id}`
-- Acoes: `POST /api/aulas/{id}/actions/{gerar-bibliografia|gerar-texto|enviar-revisao|gerar-pptx|aprovar-bibliografia|marcar-pdfs|concluir|avancar-etapa|voltar-etapa|abrir-pasta}`
+- `GET /api/aulas/{id}/texto` / `PUT /api/aulas/{id}/texto` (le/grava `04_aula_texto.md` no Drive)
+- Acoes: `POST /api/aulas/{id}/actions/{gerar-bibliografia|marcar-pdfs-baixados|salvar-texto-inicial|concluir-edicao|gerar-pptx|marcar-imagens-prontas|mover-pptx-final|avancar-etapa|voltar-etapa|abrir-pasta}`
 - Drive: `GET /api/drive/status`, `POST /api/drive/auth-start`, `POST /api/drive/bootstrap?force_relink=true&max_aulas=50`
 - Upload por aula: `POST /api/aulas/{id}/upload`, `POST /api/aulas/{id}/upload-browser` (multipart)
 
 `bootstrap` aceita `force_relink` (religa pastas ao novo root, util em migracao para Shared Drive) e `max_aulas` (lote anti-timeout).
 
 ## Maquina dos status (referencia rapida)
-`proximas_aulas` -> (gerar_bibliografia) -> `bibliografia_pronta` -> (marcar_pdfs) -> `pdfs_adicionados` -> (gerar_texto) -> `texto_pronto_revisao` -> (enviar_revisao) -> `texto_revisado` -> (gerar_pptx #1) -> `slides_em_producao` -> (gerar_pptx #2) -> `pptx_pronto` -> (concluir) -> `concluida`.
+`proximas_aulas` -(gerar_bibliografia, async)-> `bibliografia_em_geracao` -(worker termina)-> `bibliografia_pronta` -(marcar_pdfs_baixados)-> `pdfs_baixados` -(salvar_texto_inicial, ou seja, primeiro PUT /texto + acao)-> `texto_feito` -(concluir_edicao)-> `texto_editado` -(gerar_pptx)-> `pptx_gerado` -(marcar_imagens_prontas)-> `pptx_finalizado` -(mover_pptx_final)-> `pptx_na_pasta_final`.
 
 Detalhes em `aula-pipeline/backend/schemas.py` (`NEXT_ACTION_BY_STATUS`).
 
 ## Pontos de cuidado
-- Fase 2/3 sempre tentam ler artefato do Drive primeiro (`drive_artifacts.py`) e so caem para estado interno se nao houver no Drive. Isso evita perder contexto quando o container reinicia.
+- Texto da aula e a Bibliografia tentam ler artefato do Drive primeiro (`drive_artifacts.py`) e so caem para estado interno se nao houver no Drive. Isso evita perder contexto quando o container reinicia.
 - Token de OAuth pode expirar; refresh em memoria funciona automaticamente, mas se o refresh token for revogado e preciso rotacionar o secret `gineco-oauth-token`.
 - Nunca commitar `aula-pipeline/backend/credentials/`, `*.env`, `token.json`. Ja ignorado em `.gitignore`.
 - PDFs/PPTX nao vao para o git (ja ignorados); ficam apenas no Drive.

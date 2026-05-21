@@ -79,26 +79,43 @@ class Phase1Result:
     warnings: list[str] = field(default_factory=list)
 
 
-def run_phase1_bibliografia(aula: AulaItem, note: Optional[str]) -> Phase1Result:
+def run_phase1_bibliografia(
+    aula: AulaItem,
+    note: Optional[str],
+    on_progress: Optional[Callable[[str], None]] = None,
+) -> Phase1Result:
     result = Phase1Result()
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+    def _step(msg: str) -> None:
+        if on_progress:
+            try:
+                on_progress(msg)
+            except Exception:
+                pass
+
+    _step("Gerando termos de busca")
     terms = _generate_search_terms(aula, result.warnings)
 
+    _step("Buscando no PubMed")
     pubmed_md, pubmed_links = build_pubmed_markdown(aula, generated_at, terms)
     result.artifacts.append(persist_ai_artifact(aula, "pubmed_busca.md", pubmed_md))
 
+    _step("Buscando no UpToDate")
     uptodate_md, uptodate_links = build_uptodate_markdown(aula, generated_at, terms)
     result.artifacts.append(persist_ai_artifact(aula, "uptodate.md", uptodate_md))
 
+    _step("Buscando diretrizes e consensos")
     diretrizes_md, guideline_links = build_guidelines_markdown(aula, generated_at, terms)
     result.artifacts.append(persist_ai_artifact(aula, "diretrizes_consensos.md", diretrizes_md))
 
+    _step("Extraindo capítulos de livros")
     capitulos_md, uploaded_books, book_warnings = build_book_artifacts(aula, generated_at)
     result.uploaded_books.extend(uploaded_books)
     result.warnings.extend(book_warnings)
     result.artifacts.append(persist_ai_artifact(aula, "capitulos_livros.md", capitulos_md))
 
+    _step("Consolidando bibliografia")
     consolidated = build_consolidated_markdown(
         aula=aula,
         generated_at=generated_at,

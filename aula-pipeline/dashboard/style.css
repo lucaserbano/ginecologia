@@ -97,11 +97,29 @@ h1 {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(14, minmax(280px, 1fr));
+  grid-template-columns: repeat(10, minmax(290px, 1fr));
   gap: 14px;
   overflow-x: auto;
   padding: 0 24px 24px;
 }
+
+/* Cores das fases (faixa superior das colunas e cartões) */
+.column.phase-start .column-head { background: linear-gradient(180deg, #f1f5f9, #e2e8f0); }
+.column.phase-1 .column-head     { background: linear-gradient(180deg, #ecfeff, #cffafe); border-bottom-color: #a5f3fc; }
+.column.phase-2 .column-head     { background: linear-gradient(180deg, #eff6ff, #dbeafe); border-bottom-color: #bfdbfe; }
+.column.phase-3 .column-head     { background: linear-gradient(180deg, #faf5ff, #f3e8ff); border-bottom-color: #e9d5ff; }
+.column.phase-4 .column-head     { background: linear-gradient(180deg, #fff7ed, #ffedd5); border-bottom-color: #fed7aa; }
+.column.phase-final .column-head { background: linear-gradient(180deg, #ecfdf5, #d1fae5); border-bottom-color: #a7f3d0; }
+.column.phase-erro .column-head  { background: linear-gradient(180deg, #fef2f2, #fee2e2); border-bottom-color: #fecaca; }
+
+.column.phase-2 { background: rgba(239, 246, 255, 0.6); }
+.column.phase-2 .card { border-color: #bfdbfe; background: #f8fbff; }
+
+.column.phase-1 .card { border-color: #a5f3fc; }
+.column.phase-3 .card { border-color: #e9d5ff; }
+.column.phase-4 .card { border-color: #fed7aa; }
+.column.phase-final .card { border-color: #a7f3d0; }
+.column.phase-erro .card { border-color: #fecaca; background: #fff7f7; }
 
 .column {
   background: rgba(255, 255, 255, 0.84);
@@ -412,4 +430,125 @@ h1 {
   color: var(--muted, #6b7280);
   font-size: 0.82rem;
   margin-left: 0.35rem;
+}
+
+/* Spinner + progresso (coluna "Bibliografia em geração") */
+.card-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #cffafe;
+  border-top-color: #0e7490;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+.progress-label {
+  margin: 0;
+  font-size: 0.74rem;
+  color: #0e7490;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.progress-msg {
+  margin: 2px 0 0;
+  font-size: 0.88rem;
+  color: #0c4a6e;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.card-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  color: #991b1b;
+  font-size: 0.85rem;
+}
+.card-error ul { margin: 4px 0 0 18px; padding: 0; }
+
+/* Editor de texto modal */
+.editor-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 24px;
+}
+.editor-modal {
+  background: #fff;
+  border-radius: 14px;
+  width: min(960px, 100%);
+  height: min(720px, 90vh);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.editor-modal header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  gap: 12px;
+}
+.editor-modal header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.editor-loading {
+  padding: 24px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.editor-textarea {
+  flex: 1;
+  width: 100%;
+  border: none;
+  padding: 16px 18px;
+  font-family: "IBM Plex Mono", "Menlo", monospace;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  background: #fbfdfe;
+}
+.editor-modal footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 12px 18px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.editor-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.editor-hint code {
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.editor-actions {
+  display: flex;
+  gap: 8px;
 }

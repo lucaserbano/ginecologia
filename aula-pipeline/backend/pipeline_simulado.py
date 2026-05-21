@@ -32,68 +32,31 @@ def run_action(aula: AulaItem, action_key: str, note: Optional[str] = None) -> T
     if action_key == "avancar_etapa":
         return _move_stage(aula, +1, action_key, note)
 
-    if action_key == "gerar_bibliografia":
-        if status == "proximas_aulas":
-            _set_status(aula, "bibliografia_em_geracao", action_key, note)
-            return aula, "Bibliografia em geração (simulado)."
-        return aula, _invalid(action_key, status)
-
-    if action_key == "aprovar_bibliografia":
-        if status == "bibliografia_em_geracao":
-            _set_status(aula, "bibliografia_pronta", action_key, note)
-            return aula, "Bibliografia marcada como pronta."
+    if action_key == "marcar_pdfs_baixados":
         if status == "bibliografia_pronta":
-            _set_status(aula, "aguardando_aprovacao_fontes", action_key, note)
-            return aula, "Aguardando aprovação final das fontes."
-        if status == "aguardando_aprovacao_fontes":
-            _set_status(aula, "aguardando_pdfs", action_key, note)
-            return aula, "Fontes aprovadas. Aula aguardando PDFs."
+            _set_status(aula, "pdfs_baixados", action_key, note)
+            return aula, "PDFs marcados como baixados."
         return aula, _invalid(action_key, status)
 
-    if action_key == "marcar_pdfs":
-        if status == "aguardando_pdfs":
-            _set_status(aula, "pdfs_adicionados", action_key, note)
-            return aula, "PDFs marcados como adicionados."
+    if action_key == "salvar_texto_inicial":
+        if status == "pdfs_baixados":
+            _set_status(aula, "texto_feito", action_key, note)
+            return aula, "Texto inicial salvo. Pronto para edição."
         return aula, _invalid(action_key, status)
 
-    if action_key == "gerar_texto":
-        if status == "pdfs_adicionados":
-            _set_status(aula, "texto_em_producao", action_key, note)
-            return aula, "Geração de texto iniciada (simulado)."
-        if status == "texto_em_producao":
-            _set_status(aula, "texto_pronto_revisao", action_key, note)
-            return aula, "Texto pronto para revisão."
+    if action_key == "concluir_edicao":
+        if status == "texto_feito":
+            _set_status(aula, "texto_editado", action_key, note)
+            return aula, "Edição concluída. Pronto para gerar PPTX."
         return aula, _invalid(action_key, status)
 
-    if action_key == "enviar_revisao":
-        if status == "texto_pronto_revisao":
-            _set_status(aula, "texto_revisado", action_key, note)
-            return aula, "Texto revisado."
-        if status == "texto_em_producao":
-            _set_status(aula, "texto_pronto_revisao", action_key, note)
-            return aula, "Texto enviado e marcado como pronto para revisão."
-        return aula, _invalid(action_key, status)
-
-    if action_key == "gerar_pptx":
-        if status == "texto_revisado":
-            _set_status(aula, "slides_em_producao", action_key, note)
-            return aula, "Slides em produção (simulado)."
-        if status == "slides_em_producao":
-            _set_status(aula, "pptx_pronto", action_key, note)
-            return aula, "PPTX pronto."
-        return aula, _invalid(action_key, status)
-
-    if action_key == "concluir":
-        if status == "pptx_pronto":
-            _set_status(aula, "revisao_final", action_key, note)
-            return aula, "Aula em revisão final."
-        if status == "revisao_final":
-            _set_status(aula, "concluida", action_key, note)
-            return aula, "Aula concluída."
+    if action_key == "marcar_imagens_prontas":
+        if status == "pptx_gerado":
+            _set_status(aula, "pptx_finalizado", action_key, note)
+            return aula, "Imagens marcadas como prontas."
         return aula, _invalid(action_key, status)
 
     if action_key == "abrir_pasta":
-        # Sem transição de status.
         return aula, "Solicitação para abrir pasta enviada."
 
     return aula, f"Ação desconhecida: {action_key}"
@@ -105,6 +68,8 @@ def _invalid(action_key: str, status: StatusKey) -> str:
 
 
 def _move_stage(aula: AulaItem, step: int, action_key: str, note: Optional[str]) -> Tuple[AulaItem, str]:
+    if aula.status not in STATUS_FLOW:
+        return aula, _invalid(action_key, aula.status)
     idx = STATUS_FLOW.index(aula.status)
     nxt = idx + step
     if nxt < 0 or nxt >= len(STATUS_FLOW):

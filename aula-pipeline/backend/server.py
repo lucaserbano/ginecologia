@@ -8,28 +8,34 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from drive_artifacts import read_markdown_file_from_drive, write_markdown_file_to_drive
 from drive_client import DriveAuthError, build_drive
 from drive_sync import (
     bootstrap_drive_structure,
     cleanup_duplicates_all,
+    find_pptx_in_aula_folder,
     list_aula_drive_files,
+    move_pptx_to_modulo_final,
     upload_local_file_for_aula,
 )
-from ai_actions import format_ai_error, run_ai_action_if_enabled
+from ai_actions import format_ai_error, run_ai_action_if_enabled, run_bibliografia_sync
 from pipeline_simulado import run_action
 from schemas import (
     ACTION_KEY_BY_ROUTE,
+    NEXT_ACTION_BY_STATUS,
     STATUS_COLUMNS,
     ActionRequest,
     ActionResponse,
     AulaItem,
     AulasState,
     DriveUploadRequest,
+    TextoRequest,
+    TextoResponse,
 )
 from settings import ALLOWED_ORIGINS, DRIVE_ROOT_FOLDER_ID, OPEN_FOLDER_ACTION_ENABLED, ensure_drive_env
 from store import REPO_ROOT, load_state, save_state, synchronize_with_filesystem, write_bootstrap_state
@@ -290,7 +296,12 @@ async def upload_aula_file_browser(
 
 
 @app.post("/api/aulas/{aula_id}/actions/{action_route}", response_model=ActionResponse)
-def run_aula_action(aula_id: str, action_route: str, payload: Optional[ActionRequest] = None) -> ActionResponse:
+def run_aula_action(
+    aula_id: str,
+    action_route: str,
+    background_tasks: BackgroundTasks,
+    payload: Optional[ActionRequest] = None,
+) -> ActionResponse:
     note = payload.note if payload else None
     state = load_state()
     state = synchronize_with_filesystem(state)
@@ -309,6 +320,57 @@ def run_aula_action(aula_id: str, action_route: str, payload: Optional[ActionReq
         save_state(state)
         return ActionResponse(ok=ok, message=message, aula=aula)
 
+    if action_key == "gerar_bibliografia":
+        if aula.status != "proximas_aulas":
+            return ActionResponse(
+                ok=False,
+                message="Geração de bibliografia só pode ser iniciada em 'Próximas aulas'.",
+                aula=aula,
+            )
+        # Flip imediato para coluna 2 + dispara worker em background.
+        from datetime import datetime as _dt
+        aula.historico.append(
+            {
+                "timestamp": _dt.utcnow(),
+                "acao": "gerar_bibliografia",
+                "de_status": aula.status,
+                "para_status": "bibliografia_em_geracao",
+                "mensagem": "Geração iniciada.",
+            }
+        )
+        aula.status = "bibliografia_em_geracao"
+        aula.proxima_acao = NEXT_ACTION_BY_STATUS["bibliografia_em_geracao"]
+        aula.progresso = "Iniciando…"
+        aula.pendencias = []
+        aula.updated_at = _dt.utcnow()
+        save_state(state)
+        background_tasks.add_task(_run_bibliografia_background, aula_id, note)
+        return ActionResponse(ok=True, message="Geração de bibliografia iniciada em segundo plano.", aula=aula)
+
+    if action_key == "mover_pptx_final":
+        if aula.status != "pptx_finalizado":
+            return ActionResponse(
+                ok=False,
+                message="Mover para pasta final só é permitido a partir de 'PPTX finalizado'.",
+                aula=aula,
+            )
+        ok, message = ensure_drive_env()
+        if not ok:
+            return ActionResponse(ok=False, message=message, aula=aula)
+        try:
+            service = build_drive(interactive=False)
+            moved = move_pptx_to_modulo_final(service, aula, DRIVE_ROOT_FOLDER_ID)
+        except Exception as exc:
+            return ActionResponse(ok=False, message=f"Falha ao mover PPTX: {exc}", aula=aula)
+
+        aula.arquivos.pptx_web_view_link = moved.get("webViewLink") or aula.arquivos.pptx_web_view_link
+        _, message = run_action_via_simulado(aula, "avancar_etapa", note=note)
+        # avancar_etapa pode ter pulado se status já fora de fluxo; forçamos:
+        if aula.status != "pptx_na_pasta_final":
+            _force_status(aula, "pptx_na_pasta_final", "mover_pptx_final", "PPTX movido para pasta final.")
+        save_state(state)
+        return ActionResponse(ok=True, message="PPTX movido para a pasta final do módulo.", aula=aula)
+
     try:
         ai_handled, ai_message = run_ai_action_if_enabled(aula, action_key, note=note)
         if ai_handled:
@@ -323,6 +385,103 @@ def run_aula_action(aula_id: str, action_route: str, payload: Optional[ActionReq
 
     ok = not message.startswith("Ação '")
     return ActionResponse(ok=ok, message=message, aula=aula)
+
+
+def run_action_via_simulado(aula: AulaItem, action_key: str, note: Optional[str]) -> tuple[AulaItem, str]:
+    return run_action(aula, action_key, note=note)
+
+
+def _force_status(aula: AulaItem, new_status: str, acao: str, mensagem: str) -> None:
+    from datetime import datetime as _dt
+    aula.historico.append(
+        {
+            "timestamp": _dt.utcnow(),
+            "acao": acao,
+            "de_status": aula.status,
+            "para_status": new_status,
+            "mensagem": mensagem,
+        }
+    )
+    aula.status = new_status
+    aula.proxima_acao = NEXT_ACTION_BY_STATUS.get(new_status, aula.proxima_acao)
+    aula.updated_at = _dt.utcnow()
+
+
+def _run_bibliografia_background(aula_id: str, note: Optional[str]) -> None:
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        return
+
+    def _on_progress(msg: str) -> None:
+        # Cada step relê estado para evitar overwrite por outras ações.
+        st = load_state()
+        a = _find_aula(st, aula_id)
+        if not a:
+            return
+        a.progresso = msg
+        save_state(st)
+
+    try:
+        run_bibliografia_sync(aula, note, on_progress=_on_progress)
+        save_state(state)
+    except Exception as exc:
+        # Reaquire e marca erro para evitar perder logs intermediários.
+        st = load_state()
+        a = _find_aula(st, aula_id)
+        if not a:
+            return
+        a.progresso = None
+        a.pendencias = [f"Falha na geração da bibliografia: {exc}"]
+        _force_status(a, "erro_bloqueada", "gerar_bibliografia", f"Erro: {exc}")
+        save_state(st)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints de texto (04_aula_texto.md no Drive)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/aulas/{aula_id}/texto", response_model=TextoResponse)
+def get_aula_texto(aula_id: str) -> TextoResponse:
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        return TextoResponse(ok=True, conteudo="", fonte="vazio")
+    conteudo = read_markdown_file_from_drive(aula, "04_aula_texto.md", subfolder="04_aula_texto")
+    if conteudo:
+        return TextoResponse(ok=True, conteudo=conteudo, fonte="drive")
+    return TextoResponse(ok=True, conteudo="", fonte="vazio")
+
+
+@app.put("/api/aulas/{aula_id}/texto", response_model=TextoResponse)
+def put_aula_texto(aula_id: str, payload: TextoRequest) -> TextoResponse:
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada. Rode /api/drive/bootstrap.")
+
+    try:
+        write_markdown_file_to_drive(
+            aula=aula,
+            filename="04_aula_texto.md",
+            content=payload.conteudo,
+            subfolder="04_aula_texto",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha ao salvar texto no Drive: {exc}")
+
+    aula.texto_preview = (payload.conteudo or "")[:420].strip() or None
+    save_state(state)
+    return TextoResponse(ok=True, conteudo=payload.conteudo, fonte="drive")
 
 
 def _find_aula(state: AulasState, aula_id: str) -> Optional[AulaItem]:

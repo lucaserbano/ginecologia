@@ -4,60 +4,44 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from artifact_store import format_artifact_result, persist_ai_artifact
-from drive_artifacts import read_markdown_file_from_drive, read_markdown_group_from_drive
+from drive_artifacts import read_markdown_file_from_drive
 from openrouter_client import OpenRouterError, generate_text
 from phase1_bibliografia import format_phase1_result, run_phase1_bibliografia
-from prompt_loader import load_agent_prompts, load_template
+from prompt_loader import load_agent_prompts
 from schemas import NEXT_ACTION_BY_STATUS, AulaItem
 from settings import ENABLE_AI_ACTIONS
 
 
 def run_ai_action_if_enabled(aula: AulaItem, action_key: str, note: Optional[str]) -> Tuple[bool, str]:
+    """Roda ações IA síncronas curtas. A geração de bibliografia agora é
+    disparada de forma assíncrona em `server.py` via BackgroundTasks, então
+    não é tratada aqui."""
     if not ENABLE_AI_ACTIONS:
         return False, "IA desativada por configuração."
 
-    if action_key == "gerar_bibliografia":
-        if aula.status != "proximas_aulas":
-            return False, "Ação IA não aplicável no status atual."
-        phase1 = run_phase1_bibliografia(aula, note)
-        _set_status(aula, "bibliografia_pronta", action_key, "Bibliografia fase 1 gerada.")
-        return True, f"Bibliografia fase 1 gerada e marcada como pronta. {format_phase1_result(phase1)}"
-
-    if action_key == "gerar_texto":
-        if aula.status not in {"pdfs_adicionados", "texto_em_producao"}:
-            return False, "Ação IA não aplicável no status atual."
-        bibliografia_context = _build_bibliografia_context(aula)
-        output = _generate_aula_texto(aula, bibliografia_context, note)
-        artifact = persist_ai_artifact(aula, "04_aula_texto.md", output)
-        aula.texto_preview = _truncate(output, 420)
-        _set_status(aula, "texto_pronto_revisao", action_key, "Texto gerado por IA.")
-        return True, f"Texto da aula gerado por IA e enviado para revisão. {format_artifact_result(artifact)}"
-
-    if action_key == "enviar_revisao":
-        if aula.status not in {"texto_pronto_revisao", "texto_em_producao"}:
+    if action_key == "gerar_pptx":
+        if aula.status != "texto_editado":
             return False, "Ação IA não aplicável no status atual."
         source = _load_texto_source(aula)
-        output = _generate_revisao(aula, source, note)
-        artifact = persist_ai_artifact(aula, "06_revisao.md", output)
-        aula.texto_preview = _truncate(output, 420)
-        _set_status(aula, "texto_revisado", action_key, "Revisão gerada por IA.")
-        return True, f"Revisão científica gerada por IA. {format_artifact_result(artifact)}"
-
-    if action_key == "gerar_pptx":
-        if aula.status not in {"texto_revisado", "slides_em_producao"}:
-            return False, "Ação IA não aplicável no status atual."
-        source = _load_revisao_source(aula)
-        if aula.status == "texto_revisado":
-            output = _generate_outline_slides(aula, source, note)
-            artifact = persist_ai_artifact(aula, "05_outline_slides.md", output)
-            _set_status(aula, "slides_em_producao", action_key, "Outline de slides gerado por IA.")
-            return True, f"Outline de slides gerado por IA. {format_artifact_result(artifact)}"
-
-        # Segunda execução mantém o fluxo de duas etapas enquanto a montagem PPTX real é evoluída.
-        _set_status(aula, "pptx_pronto", action_key, "Etapa de slides finalizada.")
-        return True, "Etapa de slides concluída. Aula marcada como PPTX pronto."
+        output = _generate_outline_slides(aula, source, note)
+        artifact = persist_ai_artifact(aula, "05_outline_slides.md", output)
+        _set_status(aula, "pptx_gerado", action_key, "Outline de slides gerado por IA.")
+        return True, f"Outline de slides gerado. {format_artifact_result(artifact)}"
 
     return False, "Ação não suportada pelo executor IA."
+
+
+def run_bibliografia_sync(
+    aula: AulaItem,
+    note: Optional[str],
+    on_progress=None,
+) -> str:
+    """Roda a Fase 1 e retorna mensagem de sucesso. Atualiza status para
+    `bibliografia_pronta`. Pensado para rodar dentro de um BackgroundTask."""
+    phase1 = run_phase1_bibliografia(aula, note, on_progress=on_progress)
+    _set_status(aula, "bibliografia_pronta", "gerar_bibliografia", "Bibliografia fase 1 gerada.")
+    aula.progresso = None
+    return f"Bibliografia gerada. {format_phase1_result(phase1)}"
 
 
 def _set_status(aula: AulaItem, new_status: str, acao: str, mensagem: Optional[str] = None) -> None:
@@ -74,91 +58,6 @@ def _set_status(aula: AulaItem, new_status: str, acao: str, mensagem: Optional[s
             "mensagem": mensagem,
         }
     )
-
-
-def _generate_bibliografia(aula: AulaItem, note: Optional[str]) -> str:
-    agent_prompt = load_agent_prompts(
-        "curador-diretrizes-consensos.md",
-        "buscador-pubmed.md",
-        "curador-uptodate.md",
-    )
-    sys = (
-        "Você é um curador de bibliografia médica em ginecologia. "
-        "Responda em português, com precisão e sem inventar DOI/PMID se não tiver certeza.\n\n"
-        f"{agent_prompt}"
-    )
-    user = f"""
-Gere a bibliografia inicial da aula abaixo em Markdown:
-- Aula: {aula.id}
-- Módulo: M{aula.modulo_num} - {aula.modulo_nome}
-- Tema: {aula.aula_tema}
-- Observação opcional do usuário: {note or "nenhuma"}
-
-Formato obrigatório:
-# Bibliografia Inicial - {aula.id}
-## Objetivo clínico
-## Referências essenciais (6 a 10)
-- Título | Tipo de fonte | Justificativa clínica | Link/DOI/PMID (se disponível)
-## Lacunas e dúvidas para validação humana
-"""
-    return generate_text(sys, user, temperature=0.2, max_tokens=1800)
-
-
-def _generate_aula_texto(aula: AulaItem, bibliografia: str, note: Optional[str]) -> str:
-    agent_prompt = load_agent_prompts("redator-aula.md")
-    system_prompt = load_template("system_prompt_aula.md")
-    briefing = load_template("briefing_generico.yaml")
-    sys = (
-        "Você é redator médico para aulas de ginecologia. "
-        "Produza conteúdo didático, objetivo e aplicável à prática clínica.\n\n"
-        f"{system_prompt}\n\n{agent_prompt}"
-    )
-    user = f"""
-Com base na bibliografia e contexto, redija o texto da aula em português:
-- Aula: {aula.id}
-- Tema: {aula.aula_tema}
-- Observação opcional do usuário: {note or "nenhuma"}
-
-Bibliografia disponível:
-{bibliografia[:14000]}
-
-Briefing padrão:
-{briefing[:6000]}
-
-Formato obrigatório:
-# Aula {aula.id} - {aula.aula_tema}
-Escreva em blocos separados por '---' (cada bloco representa um slide).
-Evite bullets; prefira parágrafos curtos.
-Inclua sinalização de evidência fraca/controversa quando aplicável.
-Para esta execução automatizada, trate a observação opcional do usuário como o checkpoint de instruções adicionais.
-"""
-    return generate_text(sys, user, temperature=0.25, max_tokens=2800)
-
-
-def _generate_revisao(aula: AulaItem, texto: str, note: Optional[str]) -> str:
-    agent_prompt = load_agent_prompts("revisor-cientifico.md")
-    criterios = load_template("criterios_revisao.md")
-    sys = (
-        "Você é revisor científico de conteúdo médico. "
-        "Revise clareza, coerência clínica e segurança de conduta.\n\n"
-        f"{agent_prompt}\n\nCritérios de revisão:\n{criterios}"
-    )
-    user = f"""
-Revise o texto da aula abaixo:
-- Aula: {aula.id}
-- Tema: {aula.aula_tema}
-- Observação opcional do usuário: {note or "nenhuma"}
-
-Texto para revisão:
-{texto[:14000]}
-
-Formato:
-# Revisão científica - {aula.id}
-## Correções críticas
-## Ajustes recomendados
-## Texto revisado (versão final)
-"""
-    return generate_text(sys, user, temperature=0.2, max_tokens=2600)
 
 
 def _generate_outline_slides(aula: AulaItem, texto: str, note: Optional[str]) -> str:
@@ -200,41 +99,8 @@ def format_ai_error(exc: Exception) -> str:
     return f"Falha IA: {exc}"
 
 
-def _build_bibliografia_context(aula: AulaItem) -> str:
-    from_drive = read_markdown_group_from_drive(
-        aula,
-        subfolder="01_bibliografia",
-        filenames=[
-            "01_bibliografia.md",
-            "diretrizes_consensos.md",
-            "pubmed_busca.md",
-            "uptodate.md",
-            "capitulos_livros.md",
-        ],
-    )
-    from_state = aula.ai_artifacts.get("01_bibliografia.md", "")
-
-    if from_drive and from_state:
-        return f"{from_drive}\n\n---\n\n# Fonte adicional (estado interno)\n\n{from_state}"
-    if from_drive:
-        return from_drive
-    if from_state:
-        return from_state
-    return "Bibliografia indisponível; redigir com cautela e explicitar lacunas para validação humana."
-
-
 def _load_texto_source(aula: AulaItem) -> str:
     from_drive = read_markdown_file_from_drive(aula, "04_aula_texto.md", subfolder="04_aula_texto")
     if from_drive:
         return from_drive
     return aula.ai_artifacts.get("04_aula_texto.md", aula.texto_preview or "")
-
-
-def _load_revisao_source(aula: AulaItem) -> str:
-    revisao = read_markdown_file_from_drive(aula, "06_revisao.md", subfolder="06_revisao")
-    if revisao:
-        return revisao
-    texto = _load_texto_source(aula)
-    if texto:
-        return texto
-    return aula.ai_artifacts.get("06_revisao.md", "")

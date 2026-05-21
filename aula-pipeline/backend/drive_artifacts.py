@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Optional
 
-from drive_client import build_drive, download_file_bytes, list_children
+from drive_client import build_drive, download_file_bytes, ensure_folder, list_children, upload_file_to_folder
 from schemas import AulaItem
 
 
@@ -53,6 +55,51 @@ def read_markdown_group_from_drive(aula: AulaItem, subfolder: str, filenames: li
         if content:
             chunks.append(f"# Fonte: {name}\n\n{content}")
     return "\n\n---\n\n".join(chunks)
+
+
+def write_markdown_file_to_drive(
+    aula: AulaItem,
+    filename: str,
+    content: str,
+    subfolder: Optional[str] = None,
+) -> dict:
+    """Grava (overwrite) um arquivo markdown na pasta da aula no Drive.
+    Cria a subpasta se necessário. Retorna metadados do arquivo no Drive."""
+    if not aula.drive_folder_id:
+        raise ValueError("Aula sem drive_folder_id. Rode bootstrap do Drive primeiro.")
+
+    service = build_drive(interactive=False)
+
+    if subfolder:
+        if aula.drive_subfolders and subfolder in aula.drive_subfolders:
+            folder_id = aula.drive_subfolders[subfolder]
+        else:
+            created = ensure_folder(service, aula.drive_folder_id, subfolder)
+            folder_id = created["id"]
+            aula.drive_subfolders = dict(aula.drive_subfolders or {})
+            aula.drive_subfolders[subfolder] = folder_id
+    else:
+        folder_id = aula.drive_folder_id
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".md", delete=False
+    ) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        return upload_file_to_folder(
+            service,
+            local_path=tmp_path,
+            folder_id=folder_id,
+            target_name=filename,
+            replace_existing=True,
+        )
+    finally:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
 
 
 def _resolve_folder_id(service, aula: AulaItem, subfolder: Optional[str]) -> Optional[str]:
