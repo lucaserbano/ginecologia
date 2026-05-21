@@ -213,7 +213,11 @@ function renderCardActions(aula) {
       break;
 
     case "bibliografia_pronta":
-      buttons.push(linksBtn(aula, "Abrir todos os links"));
+      if (!hasBibliografiaArtifacts(aula)) {
+        buttons.push(`<button class="btn primary" data-rehidratar="${aula.id}">Carregar referências do Drive</button>`);
+      } else {
+        buttons.push(linksBtn(aula, "Abrir todos os links"));
+      }
       buttons.push(livrosBtn(aula));
       buttons.push(actionBtn("marcar-pdfs-baixados", "PDFs baixados", "color-pdf"));
       break;
@@ -267,6 +271,31 @@ function linksBtn(aula, label) {
   return `<button class="btn primary" data-open-all="${aula.id}">${escapeHtml(label)}</button>`;
 }
 
+function hasBibliografiaArtifacts(aula) {
+  const a = aula.ai_artifacts || {};
+  return BIBLIO_SOURCES.some((s) => (a[s.key] || "").trim().length > 0);
+}
+
+async function rehidratarBibliografia(aulaId) {
+  if (!apiAvailable) {
+    showToast("Indisponível em modo somente leitura.", true);
+    return false;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/rehidratar-bibliografia`, {
+      method: "POST",
+    });
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha");
+    showToast(`Carregadas ${payload.total} fonte(s) do Drive.`);
+    await loadAll(false);
+    return payload.total > 0;
+  } catch (err) {
+    showToast(`Erro ao carregar do Drive: ${err.message}`, true);
+    return false;
+  }
+}
+
 function livrosBtn(aula) {
   const folderId = aula.drive_subfolders?.["02_livros_extraidos"];
   if (!folderId) {
@@ -298,7 +327,19 @@ function attachCardHandlers(card, aula) {
     btn.addEventListener("click", () => openTextEditor(aula));
   });
   card.querySelectorAll("[data-open-all]").forEach((btn) => {
-    btn.addEventListener("click", () => openLinksInTabs(collectAllLinks(aula)));
+    btn.addEventListener("click", async () => {
+      let links = collectAllLinks(aula);
+      if (!links.length) {
+        const loaded = await rehidratarBibliografia(aula.id);
+        if (!loaded) return;
+        const refreshed = state.aulas.find((a) => a.id === aula.id);
+        links = refreshed ? collectAllLinks(refreshed) : [];
+      }
+      openLinksInTabs(links);
+    });
+  });
+  card.querySelectorAll("[data-rehidratar]").forEach((btn) => {
+    btn.addEventListener("click", () => rehidratarBibliografia(aula.id));
   });
   card.querySelectorAll("[data-drive-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
@@ -451,7 +492,16 @@ function openDetail(aulaId) {
   }
   const openAllBtn = detailContentEl.querySelector("[data-open-all]");
   if (openAllBtn) {
-    openAllBtn.addEventListener("click", () => openLinksInTabs(collectAllLinks(aula)));
+    openAllBtn.addEventListener("click", async () => {
+      let links = collectAllLinks(aula);
+      if (!links.length) {
+        const loaded = await rehidratarBibliografia(aula.id);
+        if (!loaded) return;
+        const refreshed = state.aulas.find((a) => a.id === aula.id);
+        links = refreshed ? collectAllLinks(refreshed) : [];
+      }
+      openLinksInTabs(links);
+    });
   }
   for (const btn of detailContentEl.querySelectorAll("[data-open-group]")) {
     btn.addEventListener("click", (e) => {
@@ -472,6 +522,9 @@ function openDetail(aulaId) {
       const url = target.dataset.url;
       await removerLinkBibliografia(aula.id, source, url);
     });
+  }
+  for (const btn of detailContentEl.querySelectorAll("[data-rehidratar]")) {
+    btn.addEventListener("click", () => rehidratarBibliografia(aula.id));
   }
 }
 
@@ -685,7 +738,28 @@ const BIBLIO_SOURCES = [
 function renderBibliografiaSection(aula) {
   const groups = collectBibliografiaGroups(aula);
   const total = groups.reduce((n, g) => n + g.links.length, 0);
-  if (!total) return "";
+  // Mesmo sem artifacts em memória, oferece carregar do Drive se aula já passou da fase 1.
+  if (!total) {
+    const beyondPhase1 = [
+      "bibliografia_pronta",
+      "pdfs_baixados",
+      "texto_feito",
+      "texto_editado",
+      "pptx_gerado",
+      "pptx_finalizado",
+      "pptx_na_pasta_final",
+    ].includes(aula.status);
+    if (!beyondPhase1) return "";
+    return `
+      <section class="biblio">
+        <div class="biblio-head">
+          <h3>Bibliografia</h3>
+          <button class="btn primary" data-rehidratar="${escapeAttr(aula.id)}">Carregar referências do Drive</button>
+        </div>
+        <p class="biblio-hint">Os arquivos .md estão no Drive, mas o servidor reiniciou e perdeu o cache. Clique acima para re-carregar.</p>
+      </section>
+    `;
+  }
 
   const groupsHtml = groups
     .filter((g) => g.links.length)

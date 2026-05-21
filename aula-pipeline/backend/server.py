@@ -486,6 +486,47 @@ def put_aula_texto(aula_id: str, payload: TextoRequest) -> TextoResponse:
     return TextoResponse(ok=True, conteudo=payload.conteudo, fonte="drive")
 
 
+BIBLIOGRAFIA_FILES = [
+    "01_bibliografia.md",
+    "diretrizes_consensos.md",
+    "pubmed_busca.md",
+    "uptodate.md",
+    "capitulos_livros.md",
+]
+
+
+@app.post("/api/aulas/{aula_id}/rehidratar-bibliografia")
+def rehidratar_bibliografia(aula_id: str) -> dict:
+    """Lê os .md de bibliografia do Drive (subpasta 01_bibliografia) e
+    popula `aula.ai_artifacts`. Útil quando o container reinicia e o
+    estado in-memory perde os artifacts mas os arquivos seguem no Drive."""
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada.")
+
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+
+    carregados = []
+    for filename in BIBLIOGRAFIA_FILES:
+        conteudo = read_markdown_file_from_drive(aula, filename, subfolder="01_bibliografia")
+        if conteudo:
+            aula.ai_artifacts[filename] = conteudo
+            carregados.append(filename)
+
+    save_state(state)
+    return {
+        "ok": True,
+        "aula_id": aula.id,
+        "carregados": carregados,
+        "total": len(carregados),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Bibliografia: remover um link de uma fonte (.md)
 # ---------------------------------------------------------------------------
