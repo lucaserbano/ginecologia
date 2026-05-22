@@ -70,7 +70,9 @@ LEGACY_STATUS_MAP = {
     "slides_em_producao": "texto_editado",
     "pptx_pronto": "pptx_gerado",
     "revisao_final": "pptx_finalizado",
-    "concluida": "pptx_na_pasta_final",
+    "concluida": "pptx_finalizado",
+    # Fluxo de 9 colunas (anterior à etapa final "pptx prontos") -> 8 colunas.
+    "pptx_na_pasta_final": "pptx_finalizado",
 }
 
 

@@ -8,3 +8,4 @@ python-dotenv==1.0.1
 python-multipart==0.0.9
 pypdf==5.0.1
 google-cloud-firestore==2.19.0
+python-pptx==1.0.2

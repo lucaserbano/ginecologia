@@ -7,8 +7,7 @@ const FALLBACK_COLUMNS = [
   ["texto_feito", "Texto feito"],
   ["texto_editado", "Texto editado"],
   ["pptx_gerado", "PPTX gerado"],
-  ["pptx_finalizado", "PPTX finalizado"],
-  ["pptx_na_pasta_final", "PPTX na pasta final"],
+  ["pptx_finalizado", "PPTX pronto"],
   ["erro_bloqueada", "Erro / bloqueada"],
 ];
 
@@ -21,8 +20,7 @@ const COLUMN_PHASE_CLASS = {
   texto_feito: "phase-2",
   texto_editado: "phase-3",
   pptx_gerado: "phase-4",
-  pptx_finalizado: "phase-4",
-  pptx_na_pasta_final: "phase-final",
+  pptx_finalizado: "phase-final",
   erro_bloqueada: "phase-erro",
 };
 
@@ -111,13 +109,13 @@ function renderStats() {
   const all = state.aulas;
   const filtered = getFilteredAulas();
   const total = filtered.length;
-  const finalizadas = filtered.filter((a) => a.status === "pptx_na_pasta_final").length;
+  const finalizadas = filtered.filter((a) => a.status === "pptx_finalizado").length;
   const bloqueadas = filtered.filter((a) => a.status === "erro_bloqueada").length;
   const emGeracao = filtered.filter((a) => a.status === "bibliografia_em_geracao").length;
   statsEl.innerHTML = `
     <div class="stat"><strong>${total}</strong><span>Aulas exibidas</span></div>
     <div class="stat"><strong>${all.length}</strong><span>Aulas totais</span></div>
-    <div class="stat"><strong>${finalizadas}</strong><span>Na pasta final</span></div>
+    <div class="stat"><strong>${finalizadas}</strong><span>PPTX prontos</span></div>
     <div class="stat"><strong>${emGeracao}</strong><span>Bibliografia em geração</span></div>
     <div class="stat"><strong>${bloqueadas}</strong><span>Bloqueadas</span></div>
     <div class="stat"><strong>${new Date(state.updated_at).toLocaleString("pt-BR")}</strong><span>Última sincronização</span></div>
@@ -243,11 +241,6 @@ function renderCardActions(aula) {
       break;
 
     case "pptx_finalizado":
-      buttons.push(pptxBtn(aula, "Abrir PPTX"));
-      buttons.push(actionBtn("mover-pptx-final", "Mover para pasta final", "color-concluir"));
-      break;
-
-    case "pptx_na_pasta_final":
       buttons.push(pptxBtn(aula, "Abrir PPTX"));
       break;
 
@@ -758,7 +751,6 @@ function renderBibliografiaSection(aula) {
       "texto_editado",
       "pptx_gerado",
       "pptx_finalizado",
-      "pptx_na_pasta_final",
     ].includes(aula.status);
     if (!beyondPhase1) return "";
     return `

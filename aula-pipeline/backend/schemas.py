@@ -15,7 +15,6 @@ StatusKey = Literal[
     "texto_editado",
     "pptx_gerado",
     "pptx_finalizado",
-    "pptx_na_pasta_final",
     "erro_bloqueada",
 ]
 
@@ -26,7 +25,6 @@ ACTION_KEY_BY_ROUTE = {
     "concluir-edicao": "concluir_edicao",
     "gerar-pptx": "gerar_pptx",
     "marcar-imagens-prontas": "marcar_imagens_prontas",
-    "mover-pptx-final": "mover_pptx_final",
     "abrir-pasta": "abrir_pasta",
     "avancar-etapa": "avancar_etapa",
     "voltar-etapa": "voltar_etapa",
@@ -40,8 +38,7 @@ STATUS_COLUMNS: list[tuple[StatusKey, str]] = [
     ("texto_feito", "Texto feito"),
     ("texto_editado", "Texto editado"),
     ("pptx_gerado", "PPTX gerado"),
-    ("pptx_finalizado", "PPTX finalizado"),
-    ("pptx_na_pasta_final", "PPTX na pasta final"),
+    ("pptx_finalizado", "PPTX pronto"),
     ("erro_bloqueada", "Erro / bloqueada"),
 ]
 
@@ -56,8 +53,7 @@ NEXT_ACTION_BY_STATUS: dict[StatusKey, str] = {
     "texto_feito": "Concluir edição do texto",
     "texto_editado": "Gerar PPTX",
     "pptx_gerado": "Marcar imagens como prontas",
-    "pptx_finalizado": "Mover PPTX para pasta final",
-    "pptx_na_pasta_final": "Concluída",
+    "pptx_finalizado": "Concluída",
     "erro_bloqueada": "Resolver bloqueio",
 }
 

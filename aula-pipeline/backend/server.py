@@ -20,11 +20,12 @@ from drive_client import DriveAuthError, build_drive
 from drive_sync import (
     bootstrap_drive_structure,
     cleanup_duplicates_all,
-    find_pptx_in_aula_folder,
     list_aula_drive_files,
-    move_pptx_to_modulo_final,
+    move_pptx_sem_imagens_to_prontos,
     upload_local_file_for_aula,
+    upload_pptx_to_modulo_sem_imagens,
 )
+from pptx_builder import build_pptx
 from ai_actions import format_ai_error, run_ai_action_if_enabled, run_bibliografia_sync
 from pipeline_simulado import run_action
 from schemas import (
@@ -351,11 +352,12 @@ def run_aula_action(
         msg = "Geração retomada." if retomada else "Geração de bibliografia iniciada em segundo plano."
         return ActionResponse(ok=True, message=msg, aula=aula)
 
-    if action_key == "mover_pptx_final":
-        if aula.status != "pptx_finalizado":
+    if action_key == "marcar_imagens_prontas":
+        # Etapa final: move o .pptx de 'pptx sem imagens' para 'pptx prontos'.
+        if aula.status != "pptx_gerado":
             return ActionResponse(
                 ok=False,
-                message="Mover para pasta final só é permitido a partir de 'PPTX finalizado'.",
+                message="'Imagens prontas' só é permitido a partir de 'PPTX gerado'.",
                 aula=aula,
             )
         ok, message = ensure_drive_env()
@@ -363,17 +365,98 @@ def run_aula_action(
             return ActionResponse(ok=False, message=message, aula=aula)
         try:
             service = build_drive(interactive=False)
-            moved = move_pptx_to_modulo_final(service, aula, DRIVE_ROOT_FOLDER_ID)
+            moved = move_pptx_sem_imagens_to_prontos(service, aula, DRIVE_ROOT_FOLDER_ID)
         except Exception as exc:
-            return ActionResponse(ok=False, message=f"Falha ao mover PPTX: {exc}", aula=aula)
+            return ActionResponse(
+                ok=False,
+                message=f"Falha ao mover o PPTX para 'pptx prontos': {exc}",
+                aula=aula,
+            )
 
-        aula.arquivos.pptx_web_view_link = moved.get("webViewLink") or aula.arquivos.pptx_web_view_link
-        _, message = run_action_via_simulado(aula, "avancar_etapa", note=note)
-        # avancar_etapa pode ter pulado se status já fora de fluxo; forçamos:
-        if aula.status != "pptx_na_pasta_final":
-            _force_status(aula, "pptx_na_pasta_final", "mover_pptx_final", "PPTX movido para pasta final.")
+        aula.arquivos.pptx_web_view_link = (
+            moved.get("webViewLink") or aula.arquivos.pptx_web_view_link
+        )
+        _force_status(
+            aula,
+            "pptx_finalizado",
+            "marcar_imagens_prontas",
+            "Imagens prontas — PPTX movido para 'pptx prontos'.",
+        )
         save_aula(aula)
-        return ActionResponse(ok=True, message="PPTX movido para a pasta final do módulo.", aula=aula)
+        return ActionResponse(
+            ok=True,
+            message="Imagens marcadas como prontas. PPTX movido para a pasta 'pptx prontos' do módulo.",
+            aula=aula,
+        )
+
+    if action_key == "gerar_pptx":
+        # Monta o .pptx real a partir do template e do texto editado no Drive.
+        if aula.status != "texto_editado":
+            return ActionResponse(
+                ok=False,
+                message="Gerar PPTX só é permitido a partir de 'Texto editado'.",
+                aula=aula,
+            )
+        ok, message = ensure_drive_env()
+        if not ok:
+            return ActionResponse(ok=False, message=message, aula=aula)
+
+        texto = (
+            read_markdown_file_from_drive(aula, "04_aula_texto.md", subfolder="04_aula_texto")
+            or aula.ai_artifacts.get("04_aula_texto.md")
+            or aula.texto_preview
+            or ""
+        )
+        if not texto.strip():
+            return ActionResponse(
+                ok=False,
+                message="Texto da aula vazio no Drive — não há conteúdo para montar o PPTX.",
+                aula=aula,
+            )
+
+        try:
+            pptx_bytes, n_slides = build_pptx(
+                texto=texto,
+                modulo_num=aula.modulo_num,
+                modulo_nome=aula.modulo_nome,
+                aula_num=aula.aula_num,
+                aula_nome=aula.aula_tema,
+            )
+        except Exception as exc:
+            return ActionResponse(ok=False, message=f"Falha ao montar o PPTX: {exc}", aula=aula)
+
+        target_name = f"{aula.id}.pptx"
+        tmp_path = Path(tempfile.gettempdir()) / target_name
+        try:
+            tmp_path.write_bytes(pptx_bytes)
+            service = build_drive(interactive=False)
+            uploaded = upload_pptx_to_modulo_sem_imagens(
+                service, aula, DRIVE_ROOT_FOLDER_ID, tmp_path, target_name
+            )
+        except Exception as exc:
+            return ActionResponse(ok=False, message=f"Falha ao salvar o PPTX no Drive: {exc}", aula=aula)
+        finally:
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+
+        aula.arquivos.pptx_web_view_link = (
+            uploaded.get("webViewLink") or aula.arquivos.pptx_web_view_link
+        )
+        _force_status(
+            aula,
+            "pptx_gerado",
+            "gerar_pptx",
+            f"PPTX gerado ({n_slides} slides) na pasta 'pptx sem imagens'.",
+        )
+        save_aula(aula)
+        link = uploaded.get("webViewLink") or ""
+        return ActionResponse(
+            ok=True,
+            message=f"PPTX gerado com {n_slides} slides e salvo em 'pptx sem imagens'. {link}".strip(),
+            aula=aula,
+        )
 
     try:
         ai_handled, ai_message = run_ai_action_if_enabled(aula, action_key, note=note)
@@ -389,10 +472,6 @@ def run_aula_action(
 
     ok = not message.startswith("Ação '")
     return ActionResponse(ok=ok, message=message, aula=aula)
-
-
-def run_action_via_simulado(aula: AulaItem, action_key: str, note: Optional[str]) -> tuple[AulaItem, str]:
-    return run_action(aula, action_key, note=note)
 
 
 def _force_status(aula: AulaItem, new_status: str, acao: str, mensagem: str) -> None:

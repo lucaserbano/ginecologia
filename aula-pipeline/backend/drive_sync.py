@@ -6,6 +6,8 @@ from typing import Optional
 from drive_client import (
     create_folder,
     ensure_folder,
+    find_file_in_folder,
+    find_folder,
     get_file_by_id,
     list_children,
     trash_file,
@@ -21,7 +23,8 @@ AULA_SUBFOLDERS = [
     "05_outline_slides",
 ]
 
-PPTX_FINAIS_FOLDER_NAME = "PPTX finais"
+PPTX_SEM_IMAGENS_FOLDER_NAME = "pptx sem imagens"
+PPTX_PRONTOS_FOLDER_NAME = "pptx prontos"
 
 
 def _module_and_aula_folder_names(aula: AulaItem) -> tuple[str, str]:
@@ -263,44 +266,39 @@ def cleanup_duplicates_all(drive_service, state: AulasState, dry_run: bool = Fal
     }
 
 
-def find_pptx_in_aula_folder(drive_service, aula: AulaItem) -> Optional[dict]:
-    """Procura um arquivo .pptx na raiz da pasta da aula no Drive.
-    Retorna o item (com id, name, webViewLink) ou None."""
-    if not aula.drive_folder_id:
-        return None
-    for child in list_children(drive_service, aula.drive_folder_id):
-        if child.get("mimeType") == "application/vnd.google-apps.folder":
-            continue
-        name = (child.get("name") or "").lower()
-        if name.endswith(".pptx"):
-            return child
-    return None
-
-
-def move_pptx_to_modulo_final(drive_service, aula: AulaItem, drive_root_folder_id: str) -> dict:
-    """Move o .pptx da pasta da aula para a subpasta 'PPTX finais' do módulo.
-    Cria a subpasta se não existir. Retorna metadados do arquivo movido."""
-    if not aula.drive_folder_id:
-        raise ValueError("Aula sem drive_folder_id. Rode bootstrap do Drive primeiro.")
-
-    pptx = find_pptx_in_aula_folder(drive_service, aula)
-    if not pptx:
-        raise FileNotFoundError("Nenhum .pptx encontrado na pasta da aula.")
-
+def move_pptx_sem_imagens_to_prontos(
+    drive_service,
+    aula: AulaItem,
+    drive_root_folder_id: str,
+) -> dict:
+    """Move o .pptx da aula da subpasta 'pptx sem imagens' para 'pptx prontos'
+    do módulo. Cria 'pptx prontos' se não existir. Retorna o arquivo movido."""
     module_folder_name, _ = _module_and_aula_folder_names(aula)
     modulo_folder = ensure_folder(drive_service, drive_root_folder_id, module_folder_name)
-    destino = ensure_folder(drive_service, modulo_folder["id"], PPTX_FINAIS_FOLDER_NAME)
 
-    file_id = pptx["id"]
+    origem = find_folder(drive_service, modulo_folder["id"], PPTX_SEM_IMAGENS_FOLDER_NAME)
+    if not origem:
+        raise FileNotFoundError(
+            f"Pasta '{PPTX_SEM_IMAGENS_FOLDER_NAME}' não encontrada no módulo — gere o PPTX primeiro."
+        )
+
+    pptx_name = f"{aula.id}.pptx"
+    pptx = find_file_in_folder(drive_service, origem["id"], pptx_name)
+    if not pptx:
+        raise FileNotFoundError(
+            f"'{pptx_name}' não encontrado em '{PPTX_SEM_IMAGENS_FOLDER_NAME}'."
+        )
+
+    destino = ensure_folder(drive_service, modulo_folder["id"], PPTX_PRONTOS_FOLDER_NAME)
     current = drive_service.files().get(
-        fileId=file_id, fields="parents", supportsAllDrives=True
+        fileId=pptx["id"], fields="parents", supportsAllDrives=True
     ).execute()
     previous_parents = ",".join(current.get("parents", []))
 
-    updated = (
+    return (
         drive_service.files()
         .update(
-            fileId=file_id,
+            fileId=pptx["id"],
             addParents=destino["id"],
             removeParents=previous_parents,
             fields="id,name,parents,webViewLink",
@@ -308,7 +306,26 @@ def move_pptx_to_modulo_final(drive_service, aula: AulaItem, drive_root_folder_i
         )
         .execute()
     )
-    return updated
+
+
+def upload_pptx_to_modulo_sem_imagens(
+    drive_service,
+    aula: AulaItem,
+    drive_root_folder_id: str,
+    local_path: Path,
+    target_name: str,
+) -> dict:
+    """Sobe o .pptx para a subpasta 'pptx sem imagens' do módulo da aula.
+    Cria a subpasta se não existir. Substitui arquivo de mesmo nome."""
+    module_folder_name, _ = _module_and_aula_folder_names(aula)
+    modulo_folder = ensure_folder(drive_service, drive_root_folder_id, module_folder_name)
+    destino = ensure_folder(drive_service, modulo_folder["id"], PPTX_SEM_IMAGENS_FOLDER_NAME)
+    return upload_file_to_folder(
+        drive_service,
+        local_path=local_path,
+        folder_id=destino["id"],
+        target_name=target_name,
+    )
 
 
 def _aula_drive_ready(aula: AulaItem) -> bool:

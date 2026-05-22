@@ -24,10 +24,8 @@ Cada aula deve conter:
 - `02_livros_extraidos/`
 - `03_pdfs_artigos/`
 - `04_aula_texto.md` (ou subpasta `04_aula_texto/`)
-- `05_outline_slides.md` (ou subpasta `05_outline_slides/`)
-- `M{X}_A{Y}.pptx`
 
-No Google Drive a estrutura espelha esse layout por subpastas (`01_bibliografia`, `02_livros_extraidos`, `03_pdfs_artigos`, `04_aula_texto`, `05_outline_slides`). Quando a aula avanca para "PPTX na pasta final", o `.pptx` e movido para a subpasta `PPTX finais` do modulo (irma das pastas de aula).
+No Google Drive a estrutura espelha esse layout por subpastas (`01_bibliografia`, `02_livros_extraidos`, `03_pdfs_artigos`, `04_aula_texto`). O `.pptx` montado NAO fica na pasta da aula: vai para subpastas do modulo (irmas das pastas de aula) - `pptx sem imagens` quando e gerado, e `pptx prontos` quando o coordenador conclui as imagens. O arquivo chama-se `M{X}_A{Y}.pptx`.
 
 ## Pipeline (fases / colunas do Kanban)
 Colunas (status interno → label):
@@ -37,9 +35,8 @@ Colunas (status interno → label):
 4. `pdfs_baixados` → "PDFs baixados"
 5. `texto_feito` → "Texto feito" (NotebookLM colado no kanban)
 6. `texto_editado` → "Texto editado" (edicao inline pelo coordenador)
-7. `pptx_gerado` → "PPTX gerado" (outline gerado por IA)
-8. `pptx_finalizado` → "PPTX finalizado" (imagens adicionadas)
-9. `pptx_na_pasta_final` → "PPTX na pasta final" (movido para "PPTX finais" do modulo)
+7. `pptx_gerado` → "PPTX gerado" (.pptx montado, na subpasta `pptx sem imagens`)
+8. `pptx_finalizado` → "PPTX pronto" (imagens adicionadas, .pptx em `pptx prontos`) — estado final
 
 Mais o estado lateral `erro_bloqueada` para falhas.
 
@@ -53,17 +50,17 @@ Mais o estado lateral `erro_bloqueada` para falhas.
 
 **Fase 3 - Edicao (coordenador)**: editor inline no kanban. Mesma rota `PUT /texto` para salvar. Ao concluir edicao, status `texto_feito` -> `texto_editado`.
 
-**Fase 4 - PPTX**: `gerar-pptx` gera `05_outline_slides.md` a partir do texto editado e marca `pptx_gerado` (outline-only por enquanto; montagem `.pptx` real ainda nao implementada). Coordenador adiciona imagens manualmente no .pptx e clica "Marcar imagens prontas" (`pptx_finalizado`). Finalmente "Mover para pasta final" move o .pptx para a subpasta `PPTX finais` do modulo no Drive (`pptx_na_pasta_final`).
+**Fase 4 - PPTX**: `gerar-pptx` monta o `.pptx` real a partir do template `aulas/templates/MX AY.pptx` e do texto editado, e marca `pptx_gerado`. Logica em `pptx_builder.py`: o texto e dividido em blocos por linhas de hifens (`-----`); o slide 1 e a capa (troca so numero/nome de modulo e aula); cada bloco vira uma copia do slide 2 com o texto colado na caixa a direita (fonte fixa 14pt). O arquivo `M{X}_A{Y}.pptx` e salvo na subpasta `pptx sem imagens` do modulo. O coordenador baixa, adiciona imagens manualmente e clica "Imagens prontas" (`marcar-imagens-prontas`): isso move o `.pptx` de `pptx sem imagens` para `pptx prontos` e marca `pptx_finalizado` — **etapa final do pipeline**.
 
 Agentes-prompt usados pelas acoes:
-- `@curador-diretrizes-consensos.md`, `@buscador-pubmed.md`, `@curador-uptodate.md`, `@indexador-livros.md`, `@montador-pptx.md`
-- `@redator-aula.md` ainda esta no repo, mas nao e mais usado no fluxo atual (texto vem do NotebookLM).
+- `@curador-diretrizes-consensos.md`, `@buscador-pubmed.md`, `@curador-uptodate.md`, `@indexador-livros.md`
+- `@redator-aula.md` e `@montador-pptx.md` continuam no repo mas nao sao mais usados no fluxo atual (texto vem do NotebookLM; o `.pptx` e montado por `pptx_builder.py` a partir do template, sem IA).
 
 ## Criterios de saida
 - Referencias validadas e justificadas.
 - Texto editado com fluxo didatico, decisoes clinicas e citacoes.
-- Outline de slides coerente com objetivo da aula.
-- PPTX final com imagens e dentro do limite de slides definido no briefing.
+- `.pptx` montado a partir do template, um slide por bloco de texto.
+- PPTX final com imagens, na subpasta `pptx prontos` do modulo.
 
 ---
 
@@ -130,14 +127,14 @@ gcloud run services update gineco-api \
 ## Endpoints chave
 - `GET /api/aulas` / `GET /api/aulas/{id}`
 - `GET /api/aulas/{id}/texto` / `PUT /api/aulas/{id}/texto` (le/grava `04_aula_texto.md` no Drive)
-- Acoes: `POST /api/aulas/{id}/actions/{gerar-bibliografia|marcar-pdfs-baixados|salvar-texto-inicial|concluir-edicao|gerar-pptx|marcar-imagens-prontas|mover-pptx-final|avancar-etapa|voltar-etapa|abrir-pasta}`
+- Acoes: `POST /api/aulas/{id}/actions/{gerar-bibliografia|marcar-pdfs-baixados|salvar-texto-inicial|concluir-edicao|gerar-pptx|marcar-imagens-prontas|avancar-etapa|voltar-etapa|abrir-pasta}`
 - Drive: `GET /api/drive/status`, `POST /api/drive/auth-start`, `POST /api/drive/bootstrap?force_relink=true&max_aulas=50`
 - Upload por aula: `POST /api/aulas/{id}/upload`, `POST /api/aulas/{id}/upload-browser` (multipart)
 
 `bootstrap` aceita `force_relink` (religa pastas ao novo root, util em migracao para Shared Drive) e `max_aulas` (lote anti-timeout).
 
 ## Maquina dos status (referencia rapida)
-`proximas_aulas` -(gerar_bibliografia, async)-> `bibliografia_em_geracao` -(worker termina)-> `bibliografia_pronta` -(marcar_pdfs_baixados)-> `pdfs_baixados` -(salvar_texto_inicial, ou seja, primeiro PUT /texto + acao)-> `texto_feito` -(concluir_edicao)-> `texto_editado` -(gerar_pptx)-> `pptx_gerado` -(marcar_imagens_prontas)-> `pptx_finalizado` -(mover_pptx_final)-> `pptx_na_pasta_final`.
+`proximas_aulas` -(gerar_bibliografia, async)-> `bibliografia_em_geracao` -(worker termina)-> `bibliografia_pronta` -(marcar_pdfs_baixados)-> `pdfs_baixados` -(salvar_texto_inicial, ou seja, primeiro PUT /texto + acao)-> `texto_feito` -(concluir_edicao)-> `texto_editado` -(gerar_pptx, monta o .pptx)-> `pptx_gerado` -(marcar_imagens_prontas, move .pptx p/ `pptx prontos`)-> `pptx_finalizado` (estado final).
 
 Detalhes em `aula-pipeline/backend/schemas.py` (`NEXT_ACTION_BY_STATUS`).
 
@@ -149,17 +146,14 @@ Detalhes em `aula-pipeline/backend/schemas.py` (`NEXT_ACTION_BY_STATUS`).
 - **Gemini 2.5 Pro NAO aceita `thinkingBudget=0`** (so >= 128). `openrouter_client._resolve_thinking_budget` ignora a requisicao silenciosamente quando o modelo atual e Pro. Se mudar para Flash/Flash-Lite no futuro, o `thinking_budget=0` volta a ser respeitado.
 - Google CSE: a Custom Search JSON API exige a chave API criada via Console GCP (a CLI `gcloud alpha services api-keys create` cria keys com 403 persistente). CSE precisa de sites cadastrados em "Sites para pesquisar" (modo "Search the entire web" foi descontinuado).
 
-## Estado da sessao 2026-05-20
-- Migracao para OAuth de usuario concluida; storageQuotaExceeded resolvido.
-- Fase 1 validada ponta a ponta em producao (upload Drive funcionando, 01_bibliografia/02_livros_extraidos populados).
-- Bootstrap otimizado (force_relink + max_aulas) publicado.
-- Mudancas locais ainda nao commitadas: `aula-pipeline/backend/{ai_actions,drive_client,drive_sync,server,settings}.py`, novo `drive_artifacts.py`, `aula-pipeline/README.md`.
+## Estado da sessao 2026-05-22
+- Fase 4 reescrita: `gerar-pptx` monta o `.pptx` real (`pptx_builder.py`) a partir do template `aulas/templates/MX AY.pptx`; nao gera mais outline. Dependencia nova: `python-pptx`.
+- `.pptx` salvo na subpasta `pptx sem imagens` do modulo; `marcar-imagens-prontas` move para `pptx prontos` e e a etapa final.
+- Status `pptx_na_pasta_final` e a acao `mover-pptx-final` removidos; pipeline passou de 9 para 8 colunas. `pptx_finalizado` virou o estado final ("PPTX pronto").
+- M10_A1 e M10_A2 montadas e validadas em producao (fonte 14pt, capa com nomes acentuados corrigidos no Firestore).
+- Dashboard so reflete em GitHub Pages apos `git push` na branch `main` (Pages serve `aula-pipeline/dashboard/` deste repo).
 
 ## Proximos passos sugeridos
-1. Commitar/push das mudancas locais antes de evoluir features.
-2. Validar Fase 2 em producao: rodar `gerar-texto` em aula com bibliografia pronta e conferir `04_aula_texto.md` no Drive.
-3. Validar Fase 3: `enviar-revisao` -> conferir `06_revisao.md`.
-4. Validar Fase 4: `gerar-pptx` 2x -> conferir `05_outline_slides.md`.
-5. Adicionar feedback de progresso/erro por etapa no frontend.
-6. Migrar `aulas.json` para Firestore/Cloud SQL (estado nao sobrevive a redeploy hoje).
-7. Implementar montagem real do `.pptx` (montador-pptx hoje so gera outline).
+1. Validar Fase 2 em producao: gerar texto via NotebookLM e conferir `04_aula_texto.md` no Drive.
+2. Adicionar feedback de progresso/erro por etapa no frontend.
+3. Avaliar auto-ajuste de fonte/quebra quando um bloco de texto for muito longo (hoje a fonte e fixa em 14pt e a caixa cresce com `spAutoFit`).
