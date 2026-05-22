@@ -21,6 +21,7 @@ from openrouter_client import generate_text
 from schemas import AulaItem
 from settings import (
     BOOKS_DRIVE_FOLDER_ID,
+    BRAVE_API_KEY,
     ENABLE_GEMINI_GROUNDING,
     GOOGLE_CSE_API_KEY,
     GOOGLE_CSE_CX,
@@ -868,26 +869,82 @@ def _summarize_pubtype(pubtypes: list[str]) -> str:
 
 
 def domain_search(domain: str, terms: str, limit: int) -> list[dict]:
-    """Busca restrita a um dominio. Usa Google CSE se configurado; senao
-    (ou se o CSE retornar vazio) cai para DuckDuckGo Lite com `site:`.
+    """Busca restrita a um dominio (operador `site:`).
 
-    O CSE custom engine so indexa os sites cadastrados nele (FEBRASGO/MS).
-    Para dominios fora dessa lista (ex.: uptodate.com) o CSE retorna 0
-    resultados sem erro - por isso o fallback dispara tambem em lista vazia,
-    nao so em excecao.
+    Cadeia de backends:
+    1. Brave Search API - principal; confiavel a partir do IP do Cloud Run.
+    2. Google CSE - legado; normalmente retorna 403 neste projeto.
+    3. DuckDuckGo Lite - ultimo recurso; instavel de IP de datacenter.
     """
+    query = f"site:{domain} {terms}"
+
+    def allowed(url: str, d: str = domain) -> bool:
+        return d in urllib.parse.urlparse(url).netloc
+
+    if BRAVE_API_KEY:
+        try:
+            results = [r for r in brave_search(query, count=limit) if allowed(r["url"])]
+            if results:
+                return results[:limit]
+        except Exception as exc:
+            print(f"[fase1/busca] Brave falhou ({domain}): {exc}", flush=True)
+
     if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX:
         try:
             results = google_cse_search(query=terms, site=domain, limit=limit)
             if results:
                 return results
         except Exception:
-            pass  # fallback silencioso para DDG
-    return public_search(
-        f"site:{domain} {terms}",
-        allowed=lambda url, d=domain: d in urllib.parse.urlparse(url).netloc,
-        limit=limit,
-    )
+            pass  # CSE costuma dar 403 neste projeto - segue para DDG
+
+    return public_search(query, allowed=allowed, limit=limit)
+
+
+def brave_search(query: str, count: int = 10) -> list[dict]:
+    """Busca web via Brave Search API. Retorna [{title, url}].
+
+    Brave free tier: ~1 req/s. Com 2 geracoes simultaneas pode haver
+    colisao - por isso tratamos 429 com backoff curto.
+    """
+    params = {"q": query, "count": str(min(max(count, 1), 20))}
+    url = "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode(params)
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": BRAVE_API_KEY,
+    }
+    data: dict = {}
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+                if resp.headers.get("Content-Encoding") == "gzip":
+                    import gzip
+                    raw = gzip.decompress(raw)
+                data = json.loads(raw.decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt < 3:
+                time.sleep(1.5 + attempt)
+                continue
+            raise
+        except Exception:
+            if attempt < 3:
+                time.sleep(1.5)
+                continue
+            raise
+
+    results: list[dict] = []
+    seen: set[str] = set()
+    for item in (data.get("web", {}) or {}).get("results", []) or []:
+        u = (item.get("url") or "").strip()
+        t = _clean_text(item.get("title") or "")
+        if not u or not t or u in seen:
+            continue
+        seen.add(u)
+        results.append({"title": t, "url": u})
+    return results
 
 
 def google_cse_search(query: str, site: str, limit: int) -> list[dict]:
@@ -984,8 +1041,21 @@ def _resolve_search_href(href: str) -> str:
 
 
 def _is_uptodate_content(url: str) -> bool:
+    """Aceita apenas paginas-topico reais do UpToDate: `/contents/<slug>`
+    (ou `/contents/<id>`), tolerando a variante `/print`. Rejeita
+    subpaginas como `/abstract/...` e `/contributors`, que a busca tras
+    junto mas nao sao conteudo clinico utilizavel."""
     parsed = urllib.parse.urlparse(url)
-    return parsed.netloc == "www.uptodate.com" and parsed.path.startswith("/contents/")
+    if parsed.netloc != "www.uptodate.com":
+        return False
+    if not parsed.path.startswith("/contents/"):
+        return False
+    segments = [s for s in parsed.path[len("/contents/"):].split("/") if s]
+    if len(segments) == 1:
+        return True
+    if len(segments) == 2 and segments[1] == "print":
+        return True
+    return False
 
 
 def _load_book_extractor(warnings: list[str]):

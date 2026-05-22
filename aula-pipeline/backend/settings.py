@@ -47,11 +47,14 @@ NCBI_EMAIL = os.getenv("NCBI_EMAIL", "").strip()
 NCBI_API_KEY = os.getenv("NCBI_API_KEY", "").strip()
 PHASE1_MAX_WEB_RESULTS = int(os.getenv("PHASE1_MAX_WEB_RESULTS", "8").strip())
 
-# Google Programmable Search Engine (opcional) - melhora muito a busca por
-# diretrizes em sites oficiais com operador site:. Quando GOOGLE_CSE_API_KEY
-# e GOOGLE_CSE_CX estao configurados, e usado em vez do DuckDuckGo Lite.
+# Google Programmable Search Engine (legado) - a Custom Search JSON API
+# retorna 403 neste projeto auto-provisionado, entao na pratica nao e usado.
 GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
 GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX", "").strip()
+
+# Brave Search API - busca principal por dominio (site:). Confiavel a
+# partir de IP de datacenter (Cloud Run), ao contrario do DuckDuckGo Lite.
+BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "").strip()
 
 # Vertex AI (recomendado para usar créditos Google Cloud)
 VERTEX_PROJECT_ID = (
