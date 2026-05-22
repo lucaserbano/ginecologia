@@ -61,6 +61,9 @@ VERTEX_PROJECT_ID = (
 )
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1").strip()
 VERTEX_MODEL = os.getenv("VERTEX_MODEL", "gemini-2.5-flash").strip()
+# Grounding com Google Search: o modelo busca na web em vez de responder
+# pela memoria. Usado na sugestao de diretrizes internacionais.
+ENABLE_GEMINI_GROUNDING = os.getenv("ENABLE_GEMINI_GROUNDING", "1").strip() not in {"0", "false", "no"}
 
 # Firestore (persistência do estado das aulas)
 FIRESTORE_PROJECT_ID = (

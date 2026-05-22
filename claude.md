@@ -46,8 +46,8 @@ Mais o estado lateral `erro_bloqueada` para falhas.
 **Fase 1 - Bibliografia (assincrona)**: acionar `gerar-bibliografia`. Flipa para `bibliografia_em_geracao` imediatamente e dispara `BackgroundTasks` que gera `pubmed_busca.md`, `uptodate.md`, `diretrizes_consensos.md`, `capitulos_livros.md`, `01_bibliografia.md` e extrai capitulos para `02_livros_extraidos`. Progresso aparece em `aula.progresso`. Ao terminar, marca `bibliografia_pronta`. Erro -> `erro_bloqueada`.
    - Queries por Gemini (`_generate_search_terms`).
    - PubMed: filtro `humans + 2019-3000 + (review|meta-analysis|RCT|practice guideline)`, limite 5, fallback sem filtro se < 3.
-   - UpToDate: 3 links `/contents/`, ranker prioriza diagnosis/treatment/manifestations.
-   - Diretrizes nacionais (FEBRASGO/MS): Google CSE + fallback DuckDuckGo. Internacionais: Gemini Pro + `_validate_url`. Limite total 8.
+   - UpToDate: ate 5 links `/contents/`, ranker prioriza diagnosis/treatment/manifestations. A busca usa `domain_search`, que cai para DuckDuckGo quando o Google CSE retorna vazio (o CSE so indexa os sites cadastrados nele - FEBRASGO/MS - entao para uptodate.com sempre cairia vazio).
+   - Diretrizes nacionais (FEBRASGO/MS): Google CSE + fallback DuckDuckGo. Internacionais: Gemini com **Grounding (Google Search)** quando `ENABLE_GEMINI_GROUNDING=1` (default) - o modelo busca na web em vez de recorrer a memoria; depois `_validate_url` confere cada URL. Limite total 8.
 
 **Fase 2 - Download e texto base (Eduardo)**: assistente baixa as referencias (botao "Abrir todos os links" no card), gera texto no NotebookLM, cola no editor do kanban e salva. Status: `bibliografia_pronta` -> `pdfs_baixados` -> `texto_feito`. Texto vai direto pro Drive em `04_aula_texto/04_aula_texto.md` via `PUT /api/aulas/{id}/texto`.
 
@@ -108,6 +108,7 @@ Conjunto minimo esperado:
 - `ALLOWED_ORIGINS=https://lucaserbano.github.io`
 - `OPEN_FOLDER_ACTION_ENABLED=0`
 - `ENABLE_FIRESTORE=1` (default; setar `0` apenas para forçar fallback ao JSON local)
+- `ENABLE_GEMINI_GROUNDING=1` (default; grounding com Google Search nas diretrizes internacionais — setar `0` desativa)
 - `FIRESTORE_PROJECT_ID=project-5ca1d427-8a03-4908-8cb` (default: usa VERTEX_PROJECT_ID)
 - `FIRESTORE_COLLECTION=aulas` (default)
 

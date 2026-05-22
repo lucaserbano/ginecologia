@@ -37,6 +37,7 @@ def generate_text(
     max_tokens: int = 2400,
     response_schema: dict | None = None,
     thinking_budget: int | None = None,
+    grounding: bool = False,
 ) -> str:
     """Gera texto via backend de IA configurado.
 
@@ -44,6 +45,11 @@ def generate_text(
     `thinking_budget`: passa thinkingConfig para Gemini 2.5+. Use 0 para
     desativar reasoning interno em tarefas estruturais (mais barato e
     libera o orcamento de maxOutputTokens). Ignorado no OpenRouter.
+    `grounding`: ativa Grounding com Google Search (Vertex/Gemini). Quando
+    True, o modelo busca na web em vez de responder so com a memoria.
+    Incompativel com `response_schema` (a API nao aceita tools + JSON
+    schema na mesma chamada) - nesse caso o schema e ignorado. Sem efeito
+    no OpenRouter.
     """
     if AI_BACKEND == "vertex":
         return _generate_text_vertex(
@@ -53,6 +59,7 @@ def generate_text(
             max_tokens=max_tokens,
             response_schema=response_schema,
             thinking_budget=thinking_budget,
+            grounding=grounding,
         )
     if AI_BACKEND == "openrouter":
         return _generate_text_openrouter(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
@@ -66,6 +73,7 @@ def _generate_text_vertex(
     max_tokens: int = 2400,
     response_schema: dict | None = None,
     thinking_budget: int | None = None,
+    grounding: bool = False,
 ) -> str:
     if not VERTEX_PROJECT_ID:
         raise OpenRouterError("VERTEX_PROJECT_ID/GOOGLE_CLOUD_PROJECT não configurado.")
@@ -79,6 +87,10 @@ def _generate_text_vertex(
         f"https://{VERTEX_LOCATION}-aiplatform.googleapis.com/v1/"
         f"projects/{VERTEX_PROJECT_ID}/locations/{VERTEX_LOCATION}/{endpoint_model}:generateContent"
     )
+
+    # Grounding (tools) e structured output (responseSchema) sao mutuamente
+    # exclusivos na API do Gemini. Com grounding, o schema e ignorado.
+    use_schema = bool(response_schema) and not grounding
 
     payload = {
         "systemInstruction": {
@@ -96,7 +108,7 @@ def _generate_text_vertex(
             "maxOutputTokens": max_tokens,
             **(
                 {"responseMimeType": "application/json", "responseSchema": response_schema}
-                if response_schema
+                if use_schema
                 else {}
             ),
             **(
@@ -106,6 +118,8 @@ def _generate_text_vertex(
             ),
         },
     }
+    if grounding:
+        payload["tools"] = [{"googleSearch": {}}]
 
     body = json.dumps(payload).encode("utf-8")
     headers = {

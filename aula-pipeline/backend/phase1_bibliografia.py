@@ -21,6 +21,7 @@ from openrouter_client import generate_text
 from schemas import AulaItem
 from settings import (
     BOOKS_DRIVE_FOLDER_ID,
+    ENABLE_GEMINI_GROUNDING,
     GOOGLE_CSE_API_KEY,
     GOOGLE_CSE_CX,
     NCBI_API_KEY,
@@ -45,7 +46,7 @@ GUIDELINE_SOURCES_EN = [
 ]
 
 PUBMED_LIMIT = 5
-UPTODATE_LIMIT = 3
+UPTODATE_LIMIT = 5
 GUIDELINES_LIMIT = 8
 
 BOOK_TARGETS = [
@@ -355,7 +356,9 @@ def _format_pubmed_line(link: dict) -> str:
 
 
 def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
-    candidates = domain_search(domain="www.uptodate.com", terms=terms.uptodate_query, limit=8)
+    # Busca mais candidatos do que o limite final: o filtro /contents/ e o
+    # ranker descartam parte, entao precisamos de folga para chegar a 5.
+    candidates = domain_search(domain="www.uptodate.com", terms=terms.uptodate_query, limit=15)
     valid = [c for c in candidates if _is_uptodate_content(c["url"])]
     ranked = _rank_uptodate_links(valid)
     links = ranked[:UPTODATE_LIMIT]
@@ -468,16 +471,39 @@ UPTODATE_LAY_PENALTIES = (
 
 
 def _suggest_international_guidelines(aula: AulaItem, terms_en: str) -> list[dict]:
-    """Pede ao Gemini para listar diretrizes oficiais (ACOG/RCOG/FIGO/WHO/
-    NAMS/ESHRE) com URLs canonicas, e valida cada URL via HTTP HEAD."""
+    """Lista diretrizes oficiais (ACOG/RCOG/FIGO/WHO/NAMS/ESHRE) com URLs
+    canonicas, valida cada URL via HTTP.
+
+    Com `ENABLE_GEMINI_GROUNDING`, o modelo BUSCA na web (Grounding com
+    Google Search) em vez de responder pela memoria - reduz alucinacao de
+    URL. Grounding e incompativel com structured output, entao pedimos o
+    JSON no proprio prompt e extraimos com `_extract_json`.
+    """
     sources = ", ".join(name for name, _ in GUIDELINE_SOURCES_EN)
-    sys_prompt = (
-        "Voce e um curador de diretrizes medicas. Liste diretrizes oficiais "
-        "publicadas pelas principais sociedades internacionais de ginecologia "
-        "para o tema da aula, com URLs canonicas do dominio oficial. As URLs "
-        "serao validadas via HTTP, entao um link errado e descartado "
-        "automaticamente - prefira listar mais candidatos plausiveis a omitir."
-    )
+    grounded = ENABLE_GEMINI_GROUNDING
+
+    if grounded:
+        sys_prompt = (
+            "Voce e um curador de diretrizes medicas. Use a busca do Google "
+            "para encontrar diretrizes oficiais REAIS e atuais publicadas pelas "
+            "principais sociedades internacionais de ginecologia. Confirme cada "
+            "URL na busca antes de incluir - nao invente URLs. Responda APENAS "
+            "com um objeto JSON, sem texto antes ou depois."
+        )
+    else:
+        sys_prompt = (
+            "Voce e um curador de diretrizes medicas. Liste diretrizes oficiais "
+            "publicadas pelas principais sociedades internacionais de ginecologia "
+            "para o tema da aula, com URLs canonicas do dominio oficial. As URLs "
+            "serao validadas via HTTP, entao um link errado e descartado "
+            "automaticamente - prefira listar mais candidatos plausiveis a omitir."
+        )
+
+    json_hint = (
+        '\n\nFormato da resposta (JSON estrito):\n'
+        '{"guidelines": [{"source": "ACOG", "title": "...", "url": "https://..."}]}'
+    ) if grounded else ""
+
     user_prompt = f"""Tema da aula: {aula.aula_tema}
 Termos de busca (EN): {terms_en}
 
@@ -499,15 +525,16 @@ Para cada documento informe:
 - title: titulo do documento (com numero/codigo quando aplicavel, ex.: "Practice Bulletin #194")
 - url: URL canonica no dominio oficial (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu).
 
-Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor do que omitir."""
+Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor do que omitir.{json_hint}"""
     try:
         raw = generate_text(
             sys_prompt,
             user_prompt,
             temperature=0.0,
             max_tokens=8000,
-            response_schema=INTERNATIONAL_GUIDELINES_SCHEMA,
+            response_schema=None if grounded else INTERNATIONAL_GUIDELINES_SCHEMA,
             thinking_budget=0,
+            grounding=grounded,
         )
     except Exception as exc:
         print(f"[fase1/diretrizes] Gemini falhou: {exc}", flush=True)
@@ -808,10 +835,18 @@ def _summarize_pubtype(pubtypes: list[str]) -> str:
 
 def domain_search(domain: str, terms: str, limit: int) -> list[dict]:
     """Busca restrita a um dominio. Usa Google CSE se configurado; senao
-    cai para DuckDuckGo Lite com operador `site:`."""
+    (ou se o CSE retornar vazio) cai para DuckDuckGo Lite com `site:`.
+
+    O CSE custom engine so indexa os sites cadastrados nele (FEBRASGO/MS).
+    Para dominios fora dessa lista (ex.: uptodate.com) o CSE retorna 0
+    resultados sem erro - por isso o fallback dispara tambem em lista vazia,
+    nao so em excecao.
+    """
     if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX:
         try:
-            return google_cse_search(query=terms, site=domain, limit=limit)
+            results = google_cse_search(query=terms, site=domain, limit=limit)
+            if results:
+                return results
         except Exception:
             pass  # fallback silencioso para DDG
     return public_search(
