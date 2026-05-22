@@ -25,7 +25,7 @@ from drive_sync import (
     upload_local_file_for_aula,
     upload_pptx_to_modulo_sem_imagens,
 )
-from pptx_builder import build_pptx
+from pptx_builder import build_pptx, compor_referencias
 from ai_actions import format_ai_error, run_ai_action_if_enabled, run_bibliografia_sync
 from pipeline_simulado import run_action
 from schemas import (
@@ -414,6 +414,19 @@ def run_aula_action(
                 aula=aula,
             )
 
+        # Compila as referências dos 4 .md curados (subpasta 01_bibliografia)
+        # para o slide final. São as fontes que o coordenador manteve.
+        bib_files: dict[str, str] = {}
+        for _bib in ("diretrizes_consensos.md", "pubmed_busca.md", "uptodate.md", "capitulos_livros.md"):
+            _conteudo = (
+                read_markdown_file_from_drive(aula, _bib, subfolder="01_bibliografia")
+                or aula.ai_artifacts.get(_bib)
+                or ""
+            )
+            if _conteudo:
+                bib_files[_bib] = _conteudo
+        referencias_text = compor_referencias(bib_files)
+
         try:
             pptx_bytes, n_slides = build_pptx(
                 texto=texto,
@@ -421,6 +434,7 @@ def run_aula_action(
                 modulo_nome=aula.modulo_nome,
                 aula_num=aula.aula_num,
                 aula_nome=aula.aula_tema,
+                referencias_text=referencias_text,
             )
         except Exception as exc:
             return ActionResponse(ok=False, message=f"Falha ao montar o PPTX: {exc}", aula=aula)
@@ -444,17 +458,18 @@ def run_aula_action(
         aula.arquivos.pptx_web_view_link = (
             uploaded.get("webViewLink") or aula.arquivos.pptx_web_view_link
         )
+        ref_nota = " — último slide: referências" if referencias_text.strip() else ""
         _force_status(
             aula,
             "pptx_gerado",
             "gerar_pptx",
-            f"PPTX gerado ({n_slides} slides) na pasta 'pptx sem imagens'.",
+            f"PPTX gerado ({n_slides} slides{ref_nota}) na pasta 'pptx sem imagens'.",
         )
         save_aula(aula)
         link = uploaded.get("webViewLink") or ""
         return ActionResponse(
             ok=True,
-            message=f"PPTX gerado com {n_slides} slides e salvo em 'pptx sem imagens'. {link}".strip(),
+            message=f"PPTX gerado com {n_slides} slides{ref_nota} e salvo em 'pptx sem imagens'. {link}".strip(),
             aula=aula,
         )
 

@@ -96,10 +96,16 @@ def _content_textbox(slide):
     raise ValueError("Slide de conteúdo do template não tem caixa de texto.")
 
 
-def _fill_textbox(slide, block: str, font_size_pt: int = CONTENT_FONT_SIZE_PT) -> None:
+def _fill_textbox(
+    slide,
+    block: str,
+    font_size_pt: int = CONTENT_FONT_SIZE_PT,
+    align: str | None = None,
+) -> None:
     """Cola um bloco de texto na caixa, preservando o parágrafo/run modelo
     do template e ajustando o tamanho da fonte. Linhas em branco viram
-    parágrafos vazios com a mesma altura de fonte (espaçamento)."""
+    parágrafos vazios com a mesma altura de fonte (espaçamento).
+    `align`: se informado (ex.: "l"), sobrescreve o alinhamento do template."""
     shape = _content_textbox(slide)
     txBody = shape.text_frame._txBody
     paragraphs = txBody.findall(qn("a:p"))
@@ -112,6 +118,10 @@ def _fill_textbox(slide, block: str, font_size_pt: int = CONTENT_FONT_SIZE_PT) -
     for linha in block.split("\n"):
         novo = copy.deepcopy(proto)
         runs = novo.findall(qn("a:r"))
+        if align is not None:
+            p_pr = novo.find(qn("a:pPr"))
+            if p_pr is not None:
+                p_pr.set("algn", align)
         # endParaRPr define a altura de parágrafos vazios; alinha à fonte
         # (sem isso, linhas em branco herdariam os 28pt do template).
         end_pr = novo.find(qn("a:endParaRPr"))
@@ -144,6 +154,119 @@ def _duplicate_slide(prs, src_slide):
     return dst
 
 
+# ----------------------------------------------------------------------
+# Slide final de referências (compilado dos .md de bibliografia curados)
+# ----------------------------------------------------------------------
+
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+
+# Tamanhos candidatos para a fonte do slide de referências (maior -> menor).
+_REF_FONT_SIZES = (12, 11, 10, 9)
+
+# Rótulo amigável dos livros-base.
+_LIVRO_NOMES = {
+    "tratado": "Tratado de Ginecologia (FEBRASGO)",
+    "williams": "Williams Ginecologia",
+}
+
+
+def _link_entries(md: str) -> list[dict]:
+    """Extrai de um .md de bibliografia as linhas que contêm link markdown.
+    Linhas sem link (cabeçalhos, lacunas, observações) são ignoradas."""
+    entries: list[dict] = []
+    for line in (md or "").splitlines():
+        m = _LINK_RE.search(line)
+        if not m:
+            continue
+        bold = _BOLD_RE.search(line[: m.start()])
+        meta = line[m.end():].strip().lstrip("—–-· ").strip()
+        entries.append(
+            {
+                "fonte": bold.group(1).strip() if bold else "",
+                "titulo": m.group(1).strip(),
+                "url": m.group(2).strip(),
+                "meta": meta,
+            }
+        )
+    return entries
+
+
+def _livro_entries(md: str) -> list[str]:
+    """Extrai 'Livro — capítulo' de capitulos_livros.md (o link da extração
+    fica no fim da linha e não entra no slide)."""
+    out: list[str] = []
+    for line in (md or "").splitlines():
+        if not _LINK_RE.search(line):
+            continue
+        bold = _BOLD_RE.search(line)
+        if not bold:
+            continue
+        livro = _LIVRO_NOMES.get(bold.group(1).strip().lower(), bold.group(1).strip())
+        resto = line[bold.end():].lstrip(" —–-")
+        for marca in ("· confiança", "·confiança", "→"):
+            i = resto.find(marca)
+            if i != -1:
+                resto = resto[:i]
+        cap = re.sub(r"^capítulo:\s*", "cap. ", resto.strip().rstrip("·").strip())
+        out.append(f"{livro} — {cap}" if cap else livro)
+    return out
+
+
+def compor_referencias(arquivos: dict) -> str:
+    """Compila o texto do slide final de referências a partir dos .md
+    curados (`diretrizes_consensos.md`, `pubmed_busca.md`, `uptodate.md`,
+    `capitulos_livros.md`). Retorna "" se não houver nada."""
+    secoes: list[str] = []
+
+    diretrizes = _link_entries(arquivos.get("diretrizes_consensos.md", ""))
+    if diretrizes:
+        linhas = ["Diretrizes e consensos"]
+        for e in diretrizes:
+            cab = f"• {e['fonte']} — {e['titulo']}" if e["fonte"] else f"• {e['titulo']}"
+            linhas += [cab, f"  {e['url']}"]
+        secoes.append("\n".join(linhas))
+
+    pubmed = _link_entries(arquivos.get("pubmed_busca.md", ""))
+    if pubmed:
+        linhas = ["Artigos (PubMed)"]
+        for e in pubmed:
+            extra = f" ({e['meta']})" if e["meta"] else ""
+            linhas += [f"• {e['titulo']}{extra}", f"  {e['url']}"]
+        secoes.append("\n".join(linhas))
+
+    uptodate = _link_entries(arquivos.get("uptodate.md", ""))
+    if uptodate:
+        linhas = ["UpToDate"]
+        for e in uptodate:
+            linhas += [f"• {e['titulo']}", f"  {e['url']}"]
+        secoes.append("\n".join(linhas))
+
+    livros = _livro_entries(arquivos.get("capitulos_livros.md", ""))
+    if livros:
+        linhas = ["Livros e capítulos"]
+        linhas += [f"• {l}" for l in livros]
+        secoes.append("\n".join(linhas))
+
+    if not secoes:
+        return ""
+    return "Referências\n\n" + "\n\n".join(secoes)
+
+
+def _fit_ref_font(text: str, box_width_emu: int, usable_height_in: float = 6.4) -> int:
+    """Escolhe o maior tamanho de fonte (de `_REF_FONT_SIZES`) que faz o
+    slide de referências caber na altura util do slide."""
+    width_pt = box_width_emu / 914400 * 72 - 14  # desconta as margens internas
+    for size in _REF_FONT_SIZES:
+        chars_per_line = max(20, int(width_pt / (0.5 * size)))
+        linhas = 0
+        for ln in text.split("\n"):
+            linhas += max(1, -(-len(ln) // chars_per_line))  # ceil
+        if linhas * 1.2 * size / 72 <= usable_height_in:
+            return size
+    return _REF_FONT_SIZES[-1]
+
+
 def build_pptx(
     texto: str,
     modulo_num,
@@ -152,11 +275,18 @@ def build_pptx(
     aula_nome: str,
     template_file: Path | None = None,
     content_font_size_pt: int = CONTENT_FONT_SIZE_PT,
+    referencias_text: str | None = None,
 ) -> tuple[bytes, int]:
-    """Monta o .pptx da aula. Retorna (bytes, numero_de_slides)."""
+    """Monta o .pptx da aula. Retorna (bytes, numero_de_slides).
+    Se `referencias_text` for informado, adiciona um slide final com as
+    referências (fonte reduzida automaticamente para caber)."""
     blocks = split_blocks(texto)
     if not blocks:
         blocks = [(texto or "").strip() or "(sem texto)"]
+
+    referencias = (referencias_text or "").strip()
+    # Cópias do slide-modelo necessárias: 1 por bloco + 1 de referências.
+    n_slides_conteudo = len(blocks) + (1 if referencias else 0)
 
     prs = Presentation(str(template_file or template_path()))
     if len(prs.slides) < 2:
@@ -166,12 +296,19 @@ def build_pptx(
 
     content_template = prs.slides[1]
     # Cria as cópias necessárias ANTES de preencher (mantém o modelo intacto).
-    for _ in range(len(blocks) - 1):
+    for _ in range(n_slides_conteudo - 1):
         _duplicate_slide(prs, content_template)
 
     # Slides de conteúdo ocupam os índices 1..N.
     for idx, block in enumerate(blocks):
         _fill_textbox(prs.slides[idx + 1], block, content_font_size_pt)
+
+    # Slide final de referências (índice N+1), fonte ajustada para caber.
+    if referencias:
+        ref_slide = prs.slides[len(blocks) + 1]
+        box_width = _content_textbox(ref_slide).width
+        ref_size = _fit_ref_font(referencias, box_width)
+        _fill_textbox(ref_slide, referencias, ref_size, align="l")
 
     buffer = io.BytesIO()
     prs.save(buffer)
