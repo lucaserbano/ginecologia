@@ -526,18 +526,29 @@ Para cada documento informe:
 - url: URL canonica no dominio oficial (acog.org, rcog.org.uk, figo.org, who.int, menopause.org, eshre.eu).
 
 Lembre: URLs sao validadas via HTTP - listar mais candidatos plausiveis e melhor do que omitir.{json_hint}"""
-    try:
-        raw = generate_text(
-            sys_prompt,
-            user_prompt,
-            temperature=0.0,
-            max_tokens=8000,
-            response_schema=None if grounded else INTERNATIONAL_GUIDELINES_SCHEMA,
-            thinking_budget=0,
-            grounding=grounded,
-        )
-    except Exception as exc:
-        print(f"[fase1/diretrizes] Gemini falhou: {exc}", flush=True)
+    # A chamada com grounding e intermitente (as vezes volta conteudo
+    # vazio). Tenta ate 3 vezes antes de desistir.
+    raw = ""
+    for attempt in range(3):
+        try:
+            raw = generate_text(
+                sys_prompt,
+                user_prompt,
+                temperature=0.0,
+                max_tokens=12000,
+                response_schema=None if grounded else INTERNATIONAL_GUIDELINES_SCHEMA,
+                thinking_budget=0,
+                grounding=grounded,
+            )
+            if raw and raw.strip():
+                break
+        except Exception as exc:
+            print(f"[fase1/diretrizes] tentativa {attempt + 1} falhou: {exc}", flush=True)
+            raw = ""
+        if attempt < 2:
+            time.sleep(3)
+    if not raw or not raw.strip():
+        print("[fase1/diretrizes] Gemini sem resposta apos 3 tentativas.", flush=True)
         return []
 
     try:
