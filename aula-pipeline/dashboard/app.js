@@ -209,6 +209,7 @@ function renderCardActions(aula) {
       break;
 
     case "bibliografia_em_geracao":
+      buttons.push(actionBtn("gerar-bibliografia", "Retomar geração", "color-biblio"));
       buttons.push(`<button class="btn secondary" data-action="voltar-etapa" data-id="${aula.id}">Cancelar (voltar)</button>`);
       break;
 

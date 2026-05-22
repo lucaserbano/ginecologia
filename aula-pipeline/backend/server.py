@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import logging
 from pathlib import Path
 from typing import Optional
@@ -321,31 +322,34 @@ def run_aula_action(
         return ActionResponse(ok=ok, message=message, aula=aula)
 
     if action_key == "gerar_bibliografia":
-        if aula.status != "proximas_aulas":
+        # Aceita 'proximas_aulas' (1ª vez) e 'bibliografia_em_geracao'
+        # (retomar uma geração que travou) e 'erro_bloqueada' (retry pós-erro).
+        if aula.status not in {"proximas_aulas", "bibliografia_em_geracao", "erro_bloqueada"}:
             return ActionResponse(
                 ok=False,
-                message="Geração de bibliografia só pode ser iniciada em 'Próximas aulas'.",
+                message="Geração de bibliografia só pode ser iniciada/retomada em 'Próximas aulas' ou 'Bibliografia em geração'.",
                 aula=aula,
             )
-        # Flip imediato para coluna 2 + dispara worker em background.
         from datetime import datetime as _dt
+        retomada = aula.status != "proximas_aulas"
         aula.historico.append(
             {
                 "timestamp": _dt.utcnow(),
                 "acao": "gerar_bibliografia",
                 "de_status": aula.status,
                 "para_status": "bibliografia_em_geracao",
-                "mensagem": "Geração iniciada.",
+                "mensagem": "Geração retomada." if retomada else "Geração iniciada.",
             }
         )
         aula.status = "bibliografia_em_geracao"
         aula.proxima_acao = NEXT_ACTION_BY_STATUS["bibliografia_em_geracao"]
-        aula.progresso = "Iniciando…"
+        aula.progresso = "Na fila…"
         aula.pendencias = []
         aula.updated_at = _dt.utcnow()
         save_aula(aula)
         background_tasks.add_task(_run_bibliografia_background, aula_id, note)
-        return ActionResponse(ok=True, message="Geração de bibliografia iniciada em segundo plano.", aula=aula)
+        msg = "Geração retomada." if retomada else "Geração de bibliografia iniciada em segundo plano."
+        return ActionResponse(ok=True, message=msg, aula=aula)
 
     if action_key == "mover_pptx_final":
         if aula.status != "pptx_finalizado":
@@ -407,11 +411,13 @@ def _force_status(aula: AulaItem, new_status: str, acao: str, mensagem: str) -> 
     aula.updated_at = _dt.utcnow()
 
 
+# Limita gerações simultâneas: evita estourar memória/CPU quando o usuário
+# dispara várias aulas de uma vez. As demais esperam na fila.
+_GENERATION_SEMAPHORE = threading.BoundedSemaphore(2)
+
+
 def _run_bibliografia_background(aula_id: str, note: Optional[str]) -> None:
     from store import load_aula
-    aula = load_aula(aula_id)
-    if not aula:
-        return
 
     def _on_progress(msg: str) -> None:
         # Cada step relê a aula em isolado pra evitar overwrite e minimizar writes.
@@ -421,15 +427,32 @@ def _run_bibliografia_background(aula_id: str, note: Optional[str]) -> None:
         a.progresso = msg
         save_aula(a)
 
+    # Espera vaga na fila (no máx. 2 gerações simultâneas).
+    acquired = _GENERATION_SEMAPHORE.acquire(timeout=1800)
+    if not acquired:
+        a = load_aula(aula_id)
+        if a:
+            a.progresso = None
+            a.pendencias = ["Geração não iniciou: fila cheia por tempo demais. Tente retomar."]
+            _force_status(a, "erro_bloqueada", "gerar_bibliografia", "Timeout na fila.")
+            save_aula(a)
+        return
+
     try:
+        aula = load_aula(aula_id)
+        if not aula:
+            return
         run_bibliografia_sync(aula, note, on_progress=_on_progress)
         save_aula(aula)
     except Exception as exc:
-        a = load_aula(aula_id) or aula
-        a.progresso = None
-        a.pendencias = [f"Falha na geração da bibliografia: {exc}"]
-        _force_status(a, "erro_bloqueada", "gerar_bibliografia", f"Erro: {exc}")
-        save_aula(a)
+        a = load_aula(aula_id)
+        if a:
+            a.progresso = None
+            a.pendencias = [f"Falha na geração da bibliografia: {exc}"]
+            _force_status(a, "erro_bloqueada", "gerar_bibliografia", f"Erro: {exc}")
+            save_aula(a)
+    finally:
+        _GENERATION_SEMAPHORE.release()
 
 
 # ---------------------------------------------------------------------------
