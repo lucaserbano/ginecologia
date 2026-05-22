@@ -904,9 +904,32 @@ def google_cse_search(query: str, site: str, limit: int) -> list[dict]:
     return results
 
 
+DDG_USER_AGENTS = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0",
+)
+
+
 def public_search(query: str, allowed: Callable[[str], bool], limit: int) -> list[dict]:
+    """Busca no DuckDuckGo Lite. O DDG limita IPs de datacenter (Cloud Run)
+    de forma intermitente — entao tentamos algumas vezes com backoff e
+    User-Agents diferentes antes de desistir."""
+    for attempt in range(3):
+        results = _ddg_lite_search(query, allowed, limit, ua_index=attempt)
+        if results:
+            return results
+        if attempt < 2:
+            time.sleep(2 + attempt * 3)  # 2s, 5s
+    return []
+
+
+def _ddg_lite_search(query: str, allowed: Callable[[str], bool], limit: int, ua_index: int = 0) -> list[dict]:
     url = "https://lite.duckduckgo.com/lite/?" + urllib.parse.urlencode({"q": query})
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    ua = DDG_USER_AGENTS[ua_index % len(DDG_USER_AGENTS)]
+    req = urllib.request.Request(url, headers={"User-Agent": ua})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
