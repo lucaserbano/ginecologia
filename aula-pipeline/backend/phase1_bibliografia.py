@@ -356,12 +356,12 @@ def _format_pubmed_line(link: dict) -> str:
 
 
 def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
-    # Busca mais candidatos do que o limite final: o filtro /contents/ e o
-    # ranker descartam parte, entao precisamos de folga para chegar a 5.
+    # Busca mais candidatos do que o limite final: o filtro /contents/, a
+    # deduplicacao e o ranker descartam parte, entao precisamos de folga.
     candidates = domain_search(domain="www.uptodate.com", terms=terms.uptodate_query, limit=15)
     valid = [c for c in candidates if _is_uptodate_content(c["url"])]
     ranked = _rank_uptodate_links(valid)
-    links = ranked[:UPTODATE_LIMIT]
+    links = _dedupe_uptodate(ranked)[:UPTODATE_LIMIT]
 
     if links:
         items = "\n".join(f"- [{link['title']}]({link['url']})" for link in links)
@@ -608,6 +608,29 @@ def _validate_url(url: str, timeout: int = 8) -> bool:
         except Exception:
             continue
     return False
+
+
+def _dedupe_uptodate(links: list[dict]) -> list[dict]:
+    """Remove paginas UpToDate equivalentes: variantes `/print` e topicos
+    com ID numerico que apontam para o mesmo conteudo de uma versao com
+    slug. Detecta por URL normalizada (sem `/print`) e por titulo
+    normalizado (UpToDate da o mesmo titulo para o slug e o ID numerico)."""
+    seen_urls: set[str] = set()
+    seen_titles: set[str] = set()
+    out: list[dict] = []
+    for link in links:
+        url = (link.get("url") or "").lower().rstrip("/")
+        if url.endswith("/print"):
+            url = url[: -len("/print")]
+        title = re.sub(r"\s*[-–—]\s*uptodate\s*$", "", (link.get("title") or "").lower().strip())
+        title = re.sub(r"\s+", " ", title)
+        if url in seen_urls or (title and title in seen_titles):
+            continue
+        seen_urls.add(url)
+        if title:
+            seen_titles.add(title)
+        out.append(link)
+    return out
 
 
 def _rank_uptodate_links(links: list[dict]) -> list[dict]:
