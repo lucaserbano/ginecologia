@@ -14,9 +14,18 @@ Drive da aula.
 
 O que é baixado automaticamente (decisão de projeto):
 - **UpToDate** — via `~/agent-browser-automations/baixar_uptodate.py` (sessão logada).
-- **PDFs diretos** (diretrizes/consensos com link `.pdf`, ex. FEBRASGO/MS) — via HTTP.
-- **PubMed** — só quando há versão **open-access no PMC**; o resto fica para download manual.
+- **PMC (PubMed open-access)** — abre a **página do artigo no PMC** no agent-browser e imprime para PDF (texto + figuras). Dispensa o endpoint `/pdf/` que costuma ser bloqueado.
+- **PDFs diretos** (diretrizes/consensos com link `.pdf`, ex. FEBRASGO/MS) — download nativo do navegador (ou print, se for renderizado inline).
+- **Diretrizes em HTML** (`outro`) — também são impressas para PDF via browser, com guarda contra páginas de login/paywall.
+- **PubMed sem PMC** continua indo para download manual (texto completo atrás de paywall de editora).
 - Capítulos de livro (`capitulos_livros.md`) são ignorados: já ficam em `02_livros_extraidos` no Drive.
+
+> **Por que via agent-browser?** O navegador real (com cookies/JS/UA de verdade) fura
+> bloqueios de bot que o download via HTTP simples toma — em especial no PMC. Para
+> desligar e voltar ao HTTP, use `USE_BROWSER_PDF=0`.
+
+A sessão de download usa um perfil próprio (`gineco-dl`), **sem login** — PMC e
+diretrizes são conteúdo aberto. É separada do perfil logado do UpToDate.
 
 ## Pré-requisitos
 
@@ -55,10 +64,11 @@ python3 runner/runner.py --aula M10_A1
 | `UPTODATE_SCRIPT` | `~/agent-browser-automations/baixar_uptodate.py` | caminho do baixador do UpToDate |
 | `POLL_INTERVAL` | `15` | segundos entre verificações de jobs |
 | `NCBI_API_KEY` | (vazio) | acelera/eleva o rate limit do PubMed/PMC |
+| `USE_BROWSER_PDF` | `1` | usa o agent-browser para PMC/diretrizes/PDFs diretos. `0` volta ao HTTP. |
 
 ## Limitações conhecidas
 
-- PMC via HTTP pode ser bloqueado por bot-protection; nesses casos o artigo vai
-  para a lista de **download manual** (comportamento esperado).
-- O runner não tenta burlar paywall. Texto completo de PubMed atrás de editora
-  fica sempre como manual.
+- O runner não tenta burlar paywall. Texto completo de PubMed sem versão no PMC,
+  e diretrizes que exigem login, ficam como **download manual**.
+- A captura via browser é mais lenta que o HTTP (abre uma aba por referência);
+  em compensação fura os bloqueios. ~10-30s por referência.

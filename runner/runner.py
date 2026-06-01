@@ -32,10 +32,12 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Optional
 
 import requests
 
 import pdf_sources as pdfsrc
+import browser_pdf
 
 BACKEND_URL = os.environ.get(
     "BACKEND_URL", "https://gineco-api-468351448933.us-central1.run.app"
@@ -46,6 +48,11 @@ UPTODATE_SCRIPT = Path(
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "15"))
 NCBI_API_KEY = os.environ.get("NCBI_API_KEY") or None
 PDFS_SUBFOLDER = "03_pdfs_artigos"
+# Por padrão usa o agent-browser (navegador real) para PMC/diretrizes/PDFs
+# diretos — fura bloqueios de bot que o HTTP simples toma. Setar 0 volta ao HTTP.
+USE_BROWSER_PDF = os.environ.get("USE_BROWSER_PDF", "1") not in ("0", "false", "False")
+
+session = requests.Session()
 
 session = requests.Session()
 
@@ -139,6 +146,41 @@ def baixar_uptodate(urls: list[str], outdir: Path) -> list[Path]:
 
 # --- orquestração por aula --------------------------------------------------
 
+def baixar_referencia(l: dict, workdir: Path) -> tuple[Optional[Path], str]:
+    """Baixa uma referência conforme o `kind`. Com USE_BROWSER_PDF (default),
+    usa o agent-browser (navegador real) para PMC/diretrizes/PDFs diretos —
+    fura bloqueios de bot. Senão, cai para o download via HTTP."""
+    kind, url = l["kind"], l["url"]
+    browser = USE_BROWSER_PDF and browser_pdf.is_available()
+
+    if kind == "pmc":
+        if browser:
+            return browser_pdf.grab_html_as_pdf(url, workdir)
+        return pdfsrc.try_pmc_url(url, workdir, session)
+
+    if kind == "pdf_direto":
+        if browser:
+            return browser_pdf.grab_pdf_resource(url, workdir)
+        path = pdfsrc.download_pdf(url, workdir, session)
+        return (path, "via HTTP") if path else (None, "PDF direto indisponível")
+
+    if kind == "pubmed":
+        # Resolve PMID -> PMC (eutils não é bloqueado) e abre a página do PMC.
+        if browser:
+            pmid = pdfsrc.extract_pmid(url)
+            pmcid = pdfsrc.resolve_pmcid(pmid, session, api_key=NCBI_API_KEY) if pmid else None
+            if not pmcid:
+                return None, "Sem versão open-access no PMC"
+            return browser_pdf.grab_html_as_pdf(f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/", workdir)
+        return pdfsrc.try_pubmed_open_access(url, workdir, session, api_key=NCBI_API_KEY)
+
+    # outro: páginas HTML de diretrizes/consensos — antes ia direto para manual;
+    # agora tenta imprimir a página via browser (com guarda contra paywall).
+    if browser:
+        return browser_pdf.grab_html_as_pdf(url, workdir)
+    return None, "Fonte sem download automático"
+
+
 def processar_aula(aula_id: str) -> None:
     log(f"Processando {aula_id}…")
     update_job(aula_id, "em_andamento", mensagem="Coletando referências…")
@@ -158,33 +200,14 @@ def processar_aula(aula_id: str) -> None:
             log(f"  UpToDate: {len(ut_pdfs)}/{len(uptodate_urls)} baixados ({faltam} para revisar)")
 
         for l in links:
-            kind, url = l["kind"], l["url"]
-            if kind == "uptodate" or kind == "drive":
+            if l["kind"] in ("uptodate", "drive"):
                 continue  # uptodate já tratado; drive = capítulos já no Drive
-            elif kind == "pmc":
-                path, motivo = pdfsrc.try_pmc_url(url, workdir, session)
-                if path:
-                    baixados.append(path)
-                else:
-                    pendentes.append({"title": l.get("title", ""), "url": url,
-                                      "source": l.get("source", ""), "motivo": motivo})
-            elif kind == "pdf_direto":
-                path = pdfsrc.download_pdf(url, workdir, session)
-                if path:
-                    baixados.append(path)
-                else:
-                    pendentes.append({"title": l.get("title", ""), "url": url,
-                                      "source": l.get("source", ""), "motivo": "PDF direto indisponível"})
-            elif kind == "pubmed":
-                path, motivo = pdfsrc.try_pubmed_open_access(url, workdir, session, api_key=NCBI_API_KEY)
-                if path:
-                    baixados.append(path)
-                else:
-                    pendentes.append({"title": l.get("title", ""), "url": url,
-                                      "source": l.get("source", ""), "motivo": motivo})
-            else:  # outro
-                pendentes.append({"title": l.get("title", ""), "url": url,
-                                  "source": l.get("source", ""), "motivo": "Fonte sem download automático"})
+            path, motivo = baixar_referencia(l, workdir)
+            if path:
+                baixados.append(path)
+            else:
+                pendentes.append({"title": l.get("title", ""), "url": l["url"],
+                                  "source": l.get("source", ""), "motivo": motivo})
 
         # Sobe para o Drive.
         enviados: list[str] = []
@@ -204,6 +227,12 @@ def processar_aula(aula_id: str) -> None:
             try_advance_status(aula_id)
             log("  status → tentativa de avançar para 'PDFs baixados'.")
     finally:
+        # Fecha a sessão do browser de download (libera o Chrome).
+        if USE_BROWSER_PDF and browser_pdf.is_available():
+            try:
+                browser_pdf.close()
+            except Exception:
+                pass
         # Limpa o diretório temporário.
         try:
             for p in workdir.glob("*"):
