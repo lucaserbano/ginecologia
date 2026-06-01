@@ -37,6 +37,8 @@ from schemas import (
     AulaItem,
     AulasState,
     AdicionarLinkRequest,
+    AtualizarJobRequest,
+    DownloadJob,
     DriveUploadRequest,
     RemoverLinkRequest,
     TextoRequest,
@@ -770,6 +772,167 @@ def adicionar_link_bibliografia(
         "drive_scheduled": drive_scheduled,
         "source": source,
     }
+
+
+# ---------------------------------------------------------------------------
+# Fase 1: links estruturados + job de download de PDFs (runner local)
+# ---------------------------------------------------------------------------
+
+# Fontes de referências varridas para o download (capitulos_livros fica de
+# fora: são capítulos já extraídos para 02_livros_extraidos no Drive).
+LINK_SOURCES = [
+    "diretrizes_consensos.md",
+    "pubmed_busca.md",
+    "uptodate.md",
+    "capitulos_livros.md",
+]
+
+_MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+
+
+def _classify_link_kind(url: str) -> str:
+    """Classifica um link para guiar o download automático do runner."""
+    u = url.lower()
+    after_scheme = u.split("://", 1)[-1]
+    host = after_scheme.split("/", 1)[0]
+    path = after_scheme[len(host):]
+    if "uptodate.com" in host:
+        return "uptodate"
+    if "drive.google.com" in host or "docs.google.com" in host:
+        return "drive"
+    # PMC (open-access) é baixável direto.
+    if "pmc.ncbi.nlm.nih.gov" in host or ("ncbi.nlm.nih.gov" in host and "/pmc/" in path):
+        return "pmc"
+    if "pubmed.ncbi.nlm.nih.gov" in host:
+        return "pubmed"
+    # URL que aponta para um .pdf (ignorando query).
+    if path.split("?", 1)[0].rstrip("/").endswith(".pdf"):
+        return "pdf_direto"
+    return "outro"
+
+
+def _extract_links_from_markdown(md: str, source: str) -> list[dict]:
+    """Extrai [{source, title, url, meta, kind}] de um markdown de bibliografia.
+    Espelha a regex usada no dashboard (extractLinksFromMarkdown)."""
+    if not md:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in _MD_LINK_RE.finditer(md):
+        title = (m.group(1) or "").strip()
+        url = (m.group(2) or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        tail = md[m.end():m.end() + 240]
+        meta = ""
+        # Só captura meta na MESMA linha do link ([ \t]* não cruza newline),
+        # para não absorver o bullet da linha seguinte.
+        meta_match = re.match(r"[ \t]*[—·\-]\s*([^\n]+)", tail)
+        if meta_match:
+            meta = meta_match.group(1).strip()
+        out.append(
+            {
+                "source": source,
+                "title": title,
+                "url": url,
+                "meta": meta,
+                "kind": _classify_link_kind(url),
+            }
+        )
+    return out
+
+
+def _collect_aula_links(aula: AulaItem) -> list[dict]:
+    """Junta os links de todas as fontes curadas da aula (estado interno
+    primeiro; cai para o Drive quando o cache está vazio)."""
+    links: list[dict] = []
+    seen: set[str] = set()
+    for source in LINK_SOURCES:
+        conteudo = aula.ai_artifacts.get(source) or ""
+        if not conteudo:
+            conteudo = read_markdown_file_from_drive(aula, source, subfolder="01_bibliografia") or ""
+        for link in _extract_links_from_markdown(conteudo, source):
+            if link["url"] in seen:
+                continue
+            seen.add(link["url"])
+            links.append(link)
+    return links
+
+
+@app.get("/api/aulas/{aula_id}/links")
+def listar_links_aula(aula_id: str) -> dict:
+    """Lista estruturada de todas as referências da aula, com `kind` para
+    o runner decidir como baixar cada uma."""
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    links = _collect_aula_links(aula)
+    return {"ok": True, "aula_id": aula.id, "total": len(links), "links": links}
+
+
+@app.post("/api/aulas/{aula_id}/job/download-pdfs")
+def enfileirar_download_pdfs(aula_id: str) -> dict:
+    """Enfileira um job de download de PDFs para o runner local processar.
+    Não mexe no `status` da aula — o job é ortogonal ao state machine."""
+    from datetime import datetime as _dt
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada.")
+
+    if aula.job and aula.job.status in {"pendente", "em_andamento"}:
+        return {"ok": True, "ja_em_andamento": True, "job": aula.job.model_dump(mode="json")}
+
+    agora = _dt.utcnow()
+    aula.job = DownloadJob(status="pendente", criado_em=agora, atualizado_em=agora)
+    save_aula(aula)
+    return {"ok": True, "ja_em_andamento": False, "job": aula.job.model_dump(mode="json")}
+
+
+@app.put("/api/aulas/{aula_id}/job")
+def atualizar_job_download(aula_id: str, payload: AtualizarJobRequest) -> dict:
+    """Usado pelo runner local para reportar progresso/resultado do job."""
+    from datetime import datetime as _dt
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.job:
+        raise HTTPException(status_code=404, detail="Nenhum job para esta aula.")
+
+    aula.job.status = payload.status
+    aula.job.atualizado_em = _dt.utcnow()
+    if payload.mensagem is not None:
+        aula.job.mensagem = payload.mensagem
+    if payload.baixados is not None:
+        aula.job.baixados = payload.baixados
+    if payload.pendentes_manuais is not None:
+        aula.job.pendentes_manuais = payload.pendentes_manuais
+    save_aula(aula)
+    return {"ok": True, "job": aula.job.model_dump(mode="json")}
+
+
+@app.get("/api/jobs/pendentes")
+def listar_jobs_pendentes() -> dict:
+    """Polling leve para o runner: só as aulas com job pendente/em andamento,
+    com os campos mínimos que o runner precisa."""
+    state = load_state()
+    pend = []
+    for aula in state.aulas:
+        if aula.job and aula.job.status in {"pendente", "em_andamento"}:
+            pend.append(
+                {
+                    "aula_id": aula.id,
+                    "tipo": aula.job.tipo,
+                    "status": aula.job.status,
+                    "drive_folder_id": aula.drive_folder_id,
+                }
+            )
+    return {"ok": True, "total": len(pend), "jobs": pend}
 
 
 def _write_bibliografia_drive_bg(aula_id: str, filename: str, conteudo: str) -> None:

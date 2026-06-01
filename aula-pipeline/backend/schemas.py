@@ -81,6 +81,29 @@ class PdfInfo(BaseModel):
     nomes: list[str] = Field(default_factory=list)
 
 
+# --- Download automático de PDFs (Fase 1: runner local) -------------------
+
+class LinkPendenteManual(BaseModel):
+    """Referência que o runner não conseguiu baixar automaticamente
+    (paywall, fonte heterogênea, etc.) e precisa de download manual."""
+    title: str = ""
+    url: str
+    source: str = ""
+    motivo: str = ""
+
+
+class DownloadJob(BaseModel):
+    """Estado de um job de download de PDFs disparado pelo dashboard e
+    executado pelo runner local. Orthogonal ao `status` da aula."""
+    tipo: Literal["download_pdfs"] = "download_pdfs"
+    status: Literal["pendente", "em_andamento", "concluido", "erro"] = "pendente"
+    criado_em: datetime
+    atualizado_em: datetime
+    mensagem: Optional[str] = None
+    baixados: list[str] = Field(default_factory=list)
+    pendentes_manuais: list[LinkPendenteManual] = Field(default_factory=list)
+
+
 class AulaItem(BaseModel):
     id: str
     modulo_num: int
@@ -102,6 +125,7 @@ class AulaItem(BaseModel):
     drive_subfolders: dict[str, str] = Field(default_factory=dict)
     ai_artifacts: dict[str, str] = Field(default_factory=dict)
     progresso: Optional[str] = None
+    job: Optional[DownloadJob] = None
 
 
 class AulasState(BaseModel):
@@ -153,6 +177,14 @@ class AdicionarLinkRequest(BaseModel):
     url: str
     titulo: Optional[str] = None
     meta: Optional[str] = None
+
+
+class AtualizarJobRequest(BaseModel):
+    """Usado pelo runner local para reportar progresso/resultado do job."""
+    status: Literal["em_andamento", "concluido", "erro"]
+    mensagem: Optional[str] = None
+    baixados: Optional[list[str]] = None
+    pendentes_manuais: Optional[list[LinkPendenteManual]] = None
 
 
 class TextoResponse(BaseModel):

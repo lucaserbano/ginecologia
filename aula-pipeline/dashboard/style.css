@@ -526,6 +526,31 @@ h1 {
   gap: 6px;
 }
 
+.job-done {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  font-size: 0.85rem;
+}
+.job-done .progress-msg {
+  margin: 0;
+  color: #166534;
+}
+.job-pendentes {
+  margin-top: 6px;
+}
+.job-pendentes summary {
+  cursor: pointer;
+  color: #b45309;
+  font-size: 0.82rem;
+}
+.job-pendentes ul {
+  margin: 6px 0 0;
+  padding-left: 1.1rem;
+}
+
 /* Spinner + progresso (coluna "Bibliografia em geração") */
 .card-progress {
   display: flex;

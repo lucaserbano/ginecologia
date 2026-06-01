@@ -95,7 +95,11 @@ function schedulePollingIfNeeded() {
     clearTimeout(pollTimer);
     pollTimer = null;
   }
-  const hasInflight = state?.aulas?.some((a) => a.status === "bibliografia_em_geracao");
+  const hasInflight = state?.aulas?.some(
+    (a) =>
+      a.status === "bibliografia_em_geracao" ||
+      (a.job && (a.job.status === "pendente" || a.job.status === "em_andamento"))
+  );
   if (hasInflight && apiAvailable) {
     pollTimer = setTimeout(() => loadAll(false), 5000);
   }
@@ -195,7 +199,36 @@ function renderCardStateBlock(aula) {
 
   const pdfLine = `PDFs: <strong>${aula.pdfs.baixados}/${aula.pdfs.total}</strong>`;
   const nextLine = `Próxima: <strong>${escapeHtml(aula.proxima_acao)}</strong>`;
-  return `<ul class="meta"><li>${nextLine}</li><li>${pdfLine}</li></ul>`;
+  return `<ul class="meta"><li>${nextLine}</li><li>${pdfLine}</li></ul>${renderJobBlock(aula)}`;
+}
+
+function renderJobBlock(aula) {
+  const job = aula.job;
+  if (!job || job.tipo !== "download_pdfs") return "";
+  if (job.status === "pendente" || job.status === "em_andamento") {
+    const msg = job.status === "pendente"
+      ? "Na fila — runner local vai processar."
+      : (job.mensagem || "Baixando PDFs…");
+    return `
+      <div class="card-progress">
+        <div class="spinner"></div>
+        <div>
+          <p class="progress-label">Download automático</p>
+          <p class="progress-msg">${escapeHtml(msg)}</p>
+        </div>
+      </div>`;
+  }
+  if (job.status === "erro") {
+    return `<div class="card-error"><strong>Download falhou:</strong><ul><li>${escapeHtml(job.mensagem || "Sem detalhes.")}</li></ul></div>`;
+  }
+  // concluido
+  const pend = job.pendentes_manuais || [];
+  const pendHtml = pend.length
+    ? `<details class="job-pendentes"><summary>${pend.length} para baixar manual</summary><ul>${pend
+        .map((p) => `<li>${p.url ? `<a href="${escapeAttr(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>` : escapeHtml(p.title || "—")}${p.motivo ? ` <span class="biblio-meta">${escapeHtml(p.motivo)}</span>` : ""}</li>`)
+        .join("")}</ul></details>`
+    : "";
+  return `<div class="job-done"><p class="progress-msg">✓ ${escapeHtml(job.mensagem || "Download concluído.")}</p>${pendHtml}</div>`;
 }
 
 function renderCardActions(aula) {
@@ -216,6 +249,7 @@ function renderCardActions(aula) {
         buttons.push(`<button class="btn primary" data-rehidratar="${aula.id}">Carregar referências do Drive</button>`);
       } else {
         buttons.push(linksBtn(aula, "Abrir todos os links"));
+        buttons.push(downloadPdfsBtn(aula));
       }
       buttons.push(livrosBtn(aula));
       buttons.push(actionBtn("marcar-pdfs-baixados", "PDFs baixados", "color-pdf"));
@@ -265,6 +299,13 @@ function linksBtn(aula, label) {
   return `<button class="btn primary" data-open-all="${aula.id}">${escapeHtml(label)}</button>`;
 }
 
+function downloadPdfsBtn(aula) {
+  const emAndamento = aula.job && (aula.job.status === "pendente" || aula.job.status === "em_andamento");
+  const label = emAndamento ? "Baixando…" : "Download de todos";
+  const disabled = emAndamento ? "disabled" : "";
+  return `<button class="btn next-action color-pdf" data-baixar-pdfs="${aula.id}" ${disabled}>${escapeHtml(label)}</button>`;
+}
+
 function hasBibliografiaArtifacts(aula) {
   const a = aula.ai_artifacts || {};
   return BIBLIO_SOURCES.some((s) => (a[s.key] || "").trim().length > 0);
@@ -287,6 +328,28 @@ async function rehidratarBibliografia(aulaId) {
   } catch (err) {
     showToast(`Erro ao carregar do Drive: ${err.message}`, true);
     return false;
+  }
+}
+
+async function baixarPdfs(aulaId) {
+  if (!apiAvailable) {
+    showToast("Indisponível em modo somente leitura.", true);
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/job/download-pdfs`, {
+      method: "POST",
+    });
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha");
+    showToast(
+      payload.ja_em_andamento
+        ? "Download já está em andamento."
+        : "Download enfileirado — o runner local vai baixar os PDFs."
+    );
+    await loadAll(false);
+  } catch (err) {
+    showToast(`Erro ao enfileirar download: ${err.message}`, true);
   }
 }
 
@@ -334,6 +397,9 @@ function attachCardHandlers(card, aula) {
   });
   card.querySelectorAll("[data-rehidratar]").forEach((btn) => {
     btn.addEventListener("click", () => rehidratarBibliografia(aula.id));
+  });
+  card.querySelectorAll("[data-baixar-pdfs]").forEach((btn) => {
+    btn.addEventListener("click", () => baixarPdfs(aula.id));
   });
   card.querySelectorAll("[data-drive-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
