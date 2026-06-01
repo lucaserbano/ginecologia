@@ -448,6 +448,7 @@ def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerm
 
 
 def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
+    search_engine = "google_cse" if (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) else "duckduckgo"
     # Coletamos um pool maior do que o limite e, no fim, preferimos links .pdf
     # diretos (baixáveis pelo runner) ao cortar — sem perder a relevância.
     pool_cap = GUIDELINES_LIMIT * 2
