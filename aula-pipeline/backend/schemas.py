@@ -141,6 +141,20 @@ class RemoverLinkRequest(BaseModel):
     url: str
 
 
+class AdicionarLinkRequest(BaseModel):
+    # Só as 4 fontes curadas são editáveis manualmente; 01_bibliografia.md é
+    # gerado/consolidado e não recebe inserção manual.
+    source: Literal[
+        "diretrizes_consensos.md",
+        "pubmed_busca.md",
+        "uptodate.md",
+        "capitulos_livros.md",
+    ]
+    url: str
+    titulo: Optional[str] = None
+    meta: Optional[str] = None
+
+
 class TextoResponse(BaseModel):
     ok: bool
     conteudo: str = ""

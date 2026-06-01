@@ -486,6 +486,46 @@ h1 {
   transition: opacity 0.15s ease;
 }
 
+.biblio-group-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.biblio-empty {
+  margin: 0;
+  color: var(--muted, #6b7280);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.biblio-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 0.6rem;
+  padding: 0.6rem;
+  border: 1px dashed var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.biblio-add-form[hidden] {
+  display: none;
+}
+
+.biblio-add-form input {
+  padding: 6px 8px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.biblio-add-form-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* Spinner + progresso (coluna "Bibliografia em geração") */
 .card-progress {
   display: flex;

@@ -515,6 +515,35 @@ function openDetail(aulaId) {
       await removerLinkBibliografia(aula.id, target.dataset.source, target.dataset.url, target);
     });
   }
+  for (const btn of detailContentEl.querySelectorAll("[data-add-link]")) {
+    btn.addEventListener("click", (e) => {
+      const key = e.currentTarget.dataset.addLink;
+      const form = detailContentEl.querySelector(`[data-add-form="${key}"]`);
+      if (!form) return;
+      form.hidden = !form.hidden;
+      if (!form.hidden) form.querySelector("[data-add-url]")?.focus();
+    });
+  }
+  for (const btn of detailContentEl.querySelectorAll("[data-add-cancel]")) {
+    btn.addEventListener("click", (e) => {
+      const key = e.currentTarget.dataset.addCancel;
+      const form = detailContentEl.querySelector(`[data-add-form="${key}"]`);
+      if (form) {
+        form.reset();
+        form.hidden = true;
+      }
+    });
+  }
+  for (const form of detailContentEl.querySelectorAll("[data-add-form]")) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const key = form.dataset.addForm;
+      const url = form.querySelector("[data-add-url]")?.value.trim() || "";
+      const titulo = form.querySelector("[data-add-titulo]")?.value.trim() || "";
+      const meta = form.querySelector("[data-add-meta]")?.value.trim() || "";
+      await adicionarLinkBibliografia(aula.id, key, { url, titulo, meta });
+    });
+  }
   for (const btn of detailContentEl.querySelectorAll("[data-rehidratar]")) {
     btn.addEventListener("click", () => rehidratarBibliografia(aula.id));
   }
@@ -551,6 +580,41 @@ async function removerLinkBibliografia(aulaId, source, url, btnEl) {
   } catch (err) {
     if (itemEl) itemEl.classList.remove("biblio-item-removing");
     showToast(`Erro ao remover: ${err.message}`, true);
+  }
+}
+
+async function adicionarLinkBibliografia(aulaId, source, { url, titulo, meta }) {
+  if (!apiAvailable) {
+    showToast("Indisponível no modo somente leitura.", true);
+    return;
+  }
+  const cleanUrl = (url || "").trim();
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    showToast("Informe uma URL válida (começando com http:// ou https://).", true);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/bibliografia/adicionar-link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, url: cleanUrl, titulo: titulo || null, meta: meta || null }),
+    });
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha");
+    if (payload.added === false) {
+      showToast("Essa referência já estava nesta fonte.", true);
+      return;
+    }
+    showToast(
+      payload.drive_scheduled
+        ? "Referência adicionada. Sincronizando com o Drive…"
+        : "Referência adicionada."
+    );
+    // Recarrega para refletir a nova referência e contadores.
+    loadAll(false);
+  } catch (err) {
+    showToast(`Erro ao adicionar: ${err.message}`, true);
   }
 }
 
@@ -765,7 +829,6 @@ function renderBibliografiaSection(aula) {
   }
 
   const groupsHtml = groups
-    .filter((g) => g.links.length)
     .map((g) => {
       const items = g.links
         .map(
@@ -778,13 +841,31 @@ function renderBibliografiaSection(aula) {
             </li>`
         )
         .join("");
+      const listaHtml = g.links.length
+        ? `<ul class="biblio-list">${items}</ul>`
+        : `<p class="biblio-empty">Nenhuma referência nesta fonte.</p>`;
+      const abrirBtn = g.links.length
+        ? `<button class="btn ghost" data-open-group="${escapeAttr(g.key)}">Abrir esta fonte</button>`
+        : "";
       return `
         <div class="biblio-group">
           <div class="biblio-group-head">
             <h4>${escapeHtml(g.label)} <span class="biblio-count">${g.links.length}</span></h4>
-            <button class="btn ghost" data-open-group="${escapeAttr(g.key)}">Abrir esta fonte</button>
+            <div class="biblio-group-actions">
+              ${abrirBtn}
+              <button class="btn ghost" data-add-link="${escapeAttr(g.key)}">+ Adicionar</button>
+            </div>
           </div>
-          <ul class="biblio-list">${items}</ul>
+          <form class="biblio-add-form" data-add-form="${escapeAttr(g.key)}" hidden>
+            <input type="url" data-add-url placeholder="URL da referência (https://…)" required />
+            <input type="text" data-add-titulo placeholder="Título (opcional)" />
+            <input type="text" data-add-meta placeholder="Nota / ano / fonte (opcional)" />
+            <div class="biblio-add-form-actions">
+              <button type="submit" class="btn primary" data-add-submit="${escapeAttr(g.key)}">Salvar</button>
+              <button type="button" class="btn ghost" data-add-cancel="${escapeAttr(g.key)}">Cancelar</button>
+            </div>
+          </form>
+          ${listaHtml}
         </div>`;
     })
     .join("");

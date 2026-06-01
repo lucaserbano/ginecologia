@@ -36,6 +36,7 @@ from schemas import (
     ActionResponse,
     AulaItem,
     AulasState,
+    AdicionarLinkRequest,
     DriveUploadRequest,
     RemoverLinkRequest,
     TextoRequest,
@@ -715,6 +716,62 @@ def remover_link_bibliografia(
     }
 
 
+@app.post("/api/aulas/{aula_id}/bibliografia/adicionar-link")
+def adicionar_link_bibliografia(
+    aula_id: str,
+    payload: AdicionarLinkRequest,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    """Acrescenta manualmente uma referência a uma das fontes curadas (.md).
+    Espelha `remover_link_bibliografia`: atualização otimista no estado +
+    gravação no Drive em background. Idempotente: não duplica URL existente."""
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+
+    source = payload.source
+    target_url = (payload.url or "").strip()
+    if not target_url:
+        raise HTTPException(status_code=400, detail="URL vazia.")
+
+    # Fonte: estado interno tem prioridade; se não, tenta Drive. Pode não
+    # existir ainda (aula sem aquele arquivo) — nesse caso começa vazio.
+    conteudo = aula.ai_artifacts.get(source) or ""
+    if not conteudo:
+        conteudo = read_markdown_file_from_drive(aula, source, subfolder="01_bibliografia") or ""
+
+    novo_conteudo, added = _append_link_to_markdown(
+        conteudo, target_url, payload.titulo, payload.meta
+    )
+    if not added:
+        return {"ok": True, "added": False, "source": source}
+
+    # Atualização otimista: já grava no estado. O upload Drive vai em background.
+    aula.ai_artifacts[source] = novo_conteudo
+    aula.pendencias = [p for p in aula.pendencias if not p.startswith(f"Falha ao atualizar {source}")]
+    save_aula(aula)
+
+    drive_scheduled = False
+    if aula.drive_folder_id:
+        ok, _msg = ensure_drive_env()
+        if ok:
+            background_tasks.add_task(
+                _write_bibliografia_drive_bg,
+                aula_id=aula_id,
+                filename=source,
+                conteudo=novo_conteudo,
+            )
+            drive_scheduled = True
+
+    return {
+        "ok": True,
+        "added": True,
+        "drive_scheduled": drive_scheduled,
+        "source": source,
+    }
+
+
 def _write_bibliografia_drive_bg(aula_id: str, filename: str, conteudo: str) -> None:
     from store import load_aula
     aula = load_aula(aula_id)
@@ -772,6 +829,35 @@ def _remove_link_from_markdown(content: str, target_url: str) -> tuple[str, int]
     if content.endswith("\n") and not novo.endswith("\n"):
         novo += "\n"
     return novo, removed
+
+
+def _append_link_to_markdown(
+    content: str,
+    target_url: str,
+    titulo: Optional[str],
+    meta: Optional[str],
+) -> tuple[str, bool]:
+    """Acrescenta uma linha de bullet Markdown `- [titulo](url) — meta` ao
+    final de `content`. Idempotente: se `target_url` já existir (mesma
+    comparação de `_remove_link_from_markdown`), retorna sem alterar.
+    Retorna (conteúdo novo, adicionou)."""
+    needle = target_url.split("#")[0].rstrip("/")
+    existing_urls = re.findall(r"https?://[^\s)>\]]+", content)
+    if any(u.split("#")[0].rstrip("/") == needle for u in existing_urls):
+        return content, False
+
+    titulo_fmt = (titulo or "").strip() or target_url
+    linha = f"- [{titulo_fmt}]({target_url})"
+    meta_fmt = (meta or "").strip()
+    if meta_fmt:
+        linha += f" — {meta_fmt}"
+
+    base = content.rstrip("\n")
+    if base:
+        novo = f"{base}\n{linha}\n"
+    else:
+        novo = f"{linha}\n"
+    return novo, True
 
 
 def _find_aula(state: AulasState, aula_id: str) -> Optional[AulaItem]:
