@@ -38,6 +38,12 @@ def extract_pmid(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def pmcid_from_url(url: str) -> Optional[str]:
+    """Extrai o PMCID (PMC123…) de uma URL do PMC."""
+    m = re.search(r"(PMC\d+)", url, re.I)
+    return m.group(1).upper() if m else None
+
+
 def looks_like_pdf(content: bytes) -> bool:
     """PDF de verdade começa com %PDF (eventualmente após poucos bytes de BOM)."""
     if not content:
@@ -152,6 +158,24 @@ def try_pubmed_open_access(
     if not pdf_url:
         return None, f"{pmcid} sem citation_pdf_url"
     path = download_pdf(pdf_url, dest_dir, session, referer=f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/")
+    if not path:
+        return None, f"{pmcid} encontrado mas PDF bloqueado/indisponível"
+    return path, f"baixado de {pmcid}"
+
+
+def try_pmc_url(url: str, dest_dir: Path, session) -> tuple[Optional[Path], str]:
+    """Baixa a partir de uma URL do PMC. Se já for um .pdf, baixa direto;
+    se for a página do artigo (PMC123/), resolve o citation_pdf_url."""
+    if url.lower().split("?", 1)[0].rstrip("/").endswith(".pdf"):
+        path = download_pdf(url, dest_dir, session)
+        return (path, "baixado") if path else (None, "PDF direto do PMC indisponível")
+    pmcid = pmcid_from_url(url)
+    if not pmcid:
+        return None, "URL PMC sem PMCID reconhecível"
+    pdf_url = pmc_pdf_url(pmcid, session)
+    if not pdf_url:
+        return None, f"{pmcid} sem citation_pdf_url"
+    path = download_pdf(pdf_url, dest_dir, session, referer=url)
     if not path:
         return None, f"{pmcid} encontrado mas PDF bloqueado/indisponível"
     return path, f"baixado de {pmcid}"

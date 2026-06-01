@@ -161,7 +161,14 @@ def processar_aula(aula_id: str) -> None:
             kind, url = l["kind"], l["url"]
             if kind == "uptodate" or kind == "drive":
                 continue  # uptodate já tratado; drive = capítulos já no Drive
-            elif kind in ("pdf_direto", "pmc"):
+            elif kind == "pmc":
+                path, motivo = pdfsrc.try_pmc_url(url, workdir, session)
+                if path:
+                    baixados.append(path)
+                else:
+                    pendentes.append({"title": l.get("title", ""), "url": url,
+                                      "source": l.get("source", ""), "motivo": motivo})
+            elif kind == "pdf_direto":
                 path = pdfsrc.download_pdf(url, workdir, session)
                 if path:
                     baixados.append(path)

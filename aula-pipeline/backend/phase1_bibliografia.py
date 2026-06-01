@@ -47,6 +47,9 @@ GUIDELINE_SOURCES_EN = [
 ]
 
 PUBMED_LIMIT = 5
+# Piso de artigos com PDF aberto (PMC) que tentamos garantir entre os
+# selecionados, preferindo open-access sem derrubar os mais relevantes.
+PUBMED_OA_FLOOR = 2
 UPTODATE_LIMIT = 5
 GUIDELINES_LIMIT = 8
 
@@ -284,7 +287,7 @@ def build_pubmed_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms)
         ' AND humans[Filter] AND ("2019"[PDAT]:"3000"[PDAT]) AND '
         '(review[pt] OR meta-analysis[pt] OR randomized controlled trial[pt] OR practice guideline[pt])'
     )
-    rows: list[dict] = []
+    candidates: list[dict] = []
     used_query = base_query + filters
     error = ""
 
@@ -295,23 +298,18 @@ def build_pubmed_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms)
             used_query = base_query + ' AND humans[Filter] AND ("2019"[PDAT]:"3000"[PDAT])'
             ids = pubmed_esearch(used_query, retmax=PUBMED_LIMIT * 2)
         time.sleep(0.35)
-        rows = pubmed_esummary(ids[: PUBMED_LIMIT * 2])
+        candidates = pubmed_esummary(ids[: PUBMED_LIMIT * 2])
     except Exception as exc:
+        candidates = []
         error = str(exc)
 
-    rows = rows[:PUBMED_LIMIT]
-    links = [
-        {
-            "title": row.get("title", ""),
-            "url": f"https://pubmed.ncbi.nlm.nih.gov/{row.get('pmid')}/",
-            "year": row.get("year", ""),
-            "journal": row.get("journal", ""),
-            "ptype": row.get("ptype", ""),
-            "pmid": row.get("pmid", ""),
-        }
-        for row in rows
-        if row.get("pmid")
-    ]
+    # Relevância continua como critério principal: pegamos os primeiros e só
+    # garantimos um piso de artigos com PDF aberto (PMC), trocando os menos
+    # relevantes não-baixáveis por open-access quando faltar.
+    selected = candidates[:PUBMED_LIMIT]
+    if not error:
+        selected = _ensure_oa_floor(selected, candidates, base_query, filters)
+    links = [_pubmed_link(row) for row in selected if row.get("pmid")]
 
     if links:
         items = "\n".join(_format_pubmed_line(link) for link in links)
@@ -337,6 +335,64 @@ def build_pubmed_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms)
     return md, links
 
 
+def _pubmed_link(row: dict) -> dict:
+    """Monta o link da bibliografia. Quando há versão open-access no PMC,
+    aponta para o PMC (que o runner consegue baixar) e marca open_access."""
+    pmcid = row.get("pmcid") or ""
+    if pmcid:
+        url = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
+    else:
+        url = f"https://pubmed.ncbi.nlm.nih.gov/{row.get('pmid')}/"
+    return {
+        "title": row.get("title", ""),
+        "url": url,
+        "year": row.get("year", ""),
+        "journal": row.get("journal", ""),
+        "ptype": row.get("ptype", ""),
+        "pmid": row.get("pmid", ""),
+        "pmcid": pmcid,
+        "open_access": bool(pmcid),
+    }
+
+
+def _ensure_oa_floor(
+    selected: list[dict], candidates: list[dict], base_query: str, filters: str
+) -> list[dict]:
+    """Garante ao menos PUBMED_OA_FLOOR artigos com PDF aberto (PMC) entre os
+    selecionados, sem mexer nos mais relevantes do topo: troca, da cauda para
+    a frente, os não-baixáveis por open-access. Busca extras numa query
+    dedicada `free full text` se o pool de relevância não bastar."""
+    def n_oa(rows: list[dict]) -> int:
+        return sum(1 for r in rows if r.get("pmcid"))
+
+    out = list(selected)
+    if n_oa(out) >= PUBMED_OA_FLOOR:
+        return out
+
+    selected_pmids = {r.get("pmid") for r in out}
+    # 1) baixáveis que sobraram do próprio pool de relevância
+    pool = [r for r in candidates if r.get("pmcid") and r.get("pmid") not in selected_pmids]
+    # 2) busca dedicada open-access, se ainda faltar
+    if len(pool) < (PUBMED_OA_FLOOR - n_oa(out)):
+        try:
+            oa_ids = pubmed_esearch(base_query + filters + " AND free full text[sb]", retmax=PUBMED_LIMIT * 2)
+            time.sleep(0.35)
+            oa_rows = pubmed_esummary(oa_ids[: PUBMED_LIMIT * 2])
+            known = selected_pmids | {r.get("pmid") for r in pool}
+            for r in oa_rows:
+                if r.get("pmcid") and r.get("pmid") not in known:
+                    pool.append(r)
+        except Exception:
+            pass
+
+    for i in range(len(out) - 1, -1, -1):
+        if n_oa(out) >= PUBMED_OA_FLOOR or not pool:
+            break
+        if not out[i].get("pmcid"):
+            out[i] = pool.pop(0)
+    return out
+
+
 def _format_pubmed_line(link: dict) -> str:
     meta_bits = []
     if link.get("year"):
@@ -345,6 +401,8 @@ def _format_pubmed_line(link: dict) -> str:
         meta_bits.append(link["journal"])
     if link.get("ptype"):
         meta_bits.append(link["ptype"])
+    if link.get("open_access"):
+        meta_bits.append("PDF livre (PMC)")
     meta = " · ".join(meta_bits)
     title = link.get("title") or "(sem título)"
     suffix = f" — {meta}" if meta else ""
@@ -390,32 +448,39 @@ def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerm
 
 
 def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict]]:
-    found: list[dict] = []
-    search_engine = "google_cse" if (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) else "duckduckgo"
+    # Coletamos um pool maior do que o limite e, no fim, preferimos links .pdf
+    # diretos (baixáveis pelo runner) ao cortar — sem perder a relevância.
+    pool_cap = GUIDELINES_LIMIT * 2
+    pool: list[dict] = []
 
     # Nacionais: busca por dominio (CSE com fallback DDG)
     for source_name, domain in GUIDELINE_SOURCES_PT:
-        if len(found) >= GUIDELINES_LIMIT:
+        if len(pool) >= pool_cap:
             break
         links = domain_search(domain=domain, terms=terms.guideline_terms_pt, limit=3)
         for link in _rank_guideline_links(links):
-            if len(found) >= GUIDELINES_LIMIT:
+            if len(pool) >= pool_cap:
                 break
-            if any(existing["url"] == link["url"] for existing in found):
+            if any(existing["url"] == link["url"] for existing in pool):
                 continue
-            found.append({**link, "source": source_name, "lang": "pt"})
+            pool.append({**link, "source": source_name, "lang": "pt"})
 
     # Internacionais: Gemini sugere URL canonica + validacao HTTP
-    if len(found) < GUIDELINES_LIMIT:
+    if len(pool) < pool_cap:
         suggested = _suggest_international_guidelines(aula, terms.guideline_terms_en)
         for link in suggested:
-            if len(found) >= GUIDELINES_LIMIT:
+            if len(pool) >= pool_cap:
                 break
-            if any(existing["url"] == link["url"] for existing in found):
+            if any(existing["url"] == link["url"] for existing in pool):
                 continue
             link.setdefault("lang", "en")
             link["is_pdf"] = link["url"].lower().endswith(".pdf") or ".pdf?" in link["url"].lower()
-            found.append(link)
+            pool.append(link)
+
+    # Corte final preferindo PDF direto (sort estável preserva a relevância
+    # dentro de cada grupo). Depois aplica o limite.
+    pool.sort(key=lambda l: 0 if l.get("is_pdf") else 1)
+    found = pool[:GUIDELINES_LIMIT]
 
     if found:
         items = "\n".join(
@@ -846,9 +911,20 @@ def pubmed_esummary(ids: list[str]) -> list[dict]:
                 "year": year.group(0) if year else "",
                 "journal": _clean_text(item.get("fulljournalname") or item.get("source", "")),
                 "ptype": _summarize_pubtype(pubtypes),
+                "pmcid": _extract_pmcid(item.get("articleids")),
             }
         )
     return rows
+
+
+def _extract_pmcid(articleids) -> str:
+    """PMCID do artigo (se houver versão no PMC), normalizado para 'PMC...'."""
+    for aid in articleids or []:
+        if isinstance(aid, dict) and str(aid.get("idtype", "")).lower() == "pmc":
+            val = str(aid.get("value", "")).strip()
+            if val:
+                return val if val.upper().startswith("PMC") else f"PMC{val}"
+    return ""
 
 
 def _summarize_pubtype(pubtypes: list[str]) -> str:
