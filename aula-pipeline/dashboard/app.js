@@ -213,7 +213,7 @@ function renderJobBlock(aula) {
       <div class="card-progress">
         <div class="spinner"></div>
         <div>
-          <p class="progress-label">Download automático</p>
+          <p class="progress-label">Download do UpToDate</p>
           <p class="progress-msg">${escapeHtml(msg)}</p>
         </div>
       </div>`;
@@ -301,7 +301,7 @@ function linksBtn(aula, label) {
 
 function downloadPdfsBtn(aula) {
   const emAndamento = aula.job && (aula.job.status === "pendente" || aula.job.status === "em_andamento");
-  const label = emAndamento ? "Baixando…" : "Download de todos";
+  const label = emAndamento ? "Baixando UpToDate…" : "Download do UpToDate";
   const disabled = emAndamento ? "disabled" : "";
   return `<button class="btn next-action color-pdf" data-baixar-pdfs="${aula.id}" ${disabled}>${escapeHtml(label)}</button>`;
 }
@@ -345,7 +345,7 @@ async function baixarPdfs(aulaId) {
     showToast(
       payload.ja_em_andamento
         ? "Download já está em andamento."
-        : "Download enfileirado — o runner local vai baixar os PDFs."
+        : "Download enfileirado — o runner local vai baixar as páginas do UpToDate."
     );
     await loadAll(false);
   } catch (err) {

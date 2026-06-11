@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Runner local da Fase 1 — "Download de todos".
+"""Runner local da Fase 1 — "Download do UpToDate".
 
 Roda na máquina do Lucas (precisa do agent-browser logado no UpToDate). Faz
-polling no backend por jobs de download de PDFs, baixa as referências de cada
-aula (UpToDate via baixar_uptodate.py; PDFs diretos e PMC open-access via HTTP)
-e sobe os arquivos para a subpasta 03_pdfs_artigos do Drive da aula, usando os
-endpoints que já existem no backend.
+polling no backend por jobs de download, baixa APENAS as páginas do UpToDate de
+cada aula (via baixar_uptodate.py) e sobe os PDFs para a subpasta
+03_pdfs_artigos do Drive da aula, usando os endpoints que já existem no backend.
+
+PubMed e diretrizes/consensos ficam listados na bibliografia para uso manual
+(NotebookLM, leitura), fora do download automático; capítulos de livro já são
+enviados ao Drive na geração da bibliografia. (A função `baixar_referencia`
+abaixo, que baixa PMC/PDFs diretos, segue disponível mas não é usada no fluxo
+atual — mantida para reativação futura.)
 
 Uso:
   # loop contínuo (deixe rodando em um terminal):
@@ -183,7 +188,7 @@ def baixar_referencia(l: dict, workdir: Path) -> tuple[Optional[Path], str]:
 
 def processar_aula(aula_id: str) -> None:
     log(f"Processando {aula_id}…")
-    update_job(aula_id, "em_andamento", mensagem="Coletando referências…")
+    update_job(aula_id, "em_andamento", mensagem="Baixando páginas do UpToDate…")
 
     links = get_links(aula_id)
     baixados: list[Path] = []
@@ -191,25 +196,24 @@ def processar_aula(aula_id: str) -> None:
 
     workdir = Path(tempfile.mkdtemp(prefix=f"dl_{aula_id}_"))
     try:
-        uptodate_urls = [l["url"] for l in links if l["kind"] == "uptodate"]
+        # Por desenho, o download automático cobre APENAS o UpToDate (páginas que
+        # só são capturáveis via navegador logado). PubMed e diretrizes/consensos
+        # ficam listados na bibliografia para uso manual/NotebookLM; capítulos de
+        # livro já vão para o Drive na geração da bibliografia.
+        uptodate = [l for l in links if l["kind"] == "uptodate"]
+        uptodate_urls = [l["url"] for l in uptodate]
         ut_pdfs = baixar_uptodate(uptodate_urls, workdir)
         baixados.extend(ut_pdfs)
-        # UpToDate que não viraram PDF (falha de acesso) entram como manuais.
+        # UpToDate que não viraram PDF (falha de acesso/login) entram como manuais.
         if len(ut_pdfs) < len(uptodate_urls):
             faltam = len(uptodate_urls) - len(ut_pdfs)
             log(f"  UpToDate: {len(ut_pdfs)}/{len(uptodate_urls)} baixados ({faltam} para revisar)")
-
-        for l in links:
-            if l["kind"] in ("uptodate", "drive"):
-                continue  # uptodate já tratado; drive = capítulos já no Drive
-            path, motivo = baixar_referencia(l, workdir)
-            if path:
-                baixados.append(path)
-            else:
+            for l in uptodate[len(ut_pdfs):]:
                 pendentes.append({"title": l.get("title", ""), "url": l["url"],
-                                  "source": l.get("source", ""), "motivo": motivo})
+                                  "source": l.get("source", "UpToDate"),
+                                  "motivo": "UpToDate não baixado (verifique o login no navegador)"})
 
-        # Sobe para o Drive.
+        # Sobe os PDFs do UpToDate para o Drive.
         enviados: list[str] = []
         for path in baixados:
             if upload_pdf(aula_id, path):
@@ -218,7 +222,7 @@ def processar_aula(aula_id: str) -> None:
                 pendentes.append({"title": path.name, "url": "", "source": "",
                                   "motivo": "Baixado, mas upload ao Drive falhou"})
 
-        msg = f"{len(enviados)} PDF(s) no Drive; {len(pendentes)} para revisar manualmente."
+        msg = f"{len(enviados)} PDF(s) do UpToDate no Drive; {len(pendentes)} para revisar manualmente."
         update_job(aula_id, "concluido", mensagem=msg, baixados=enviados, pendentes_manuais=pendentes)
         log(f"  OK: {msg}")
 

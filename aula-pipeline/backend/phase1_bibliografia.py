@@ -32,8 +32,12 @@ from settings import (
 from store import REPO_ROOT
 
 
+# Nacionais: a FEBRASGO publica suas diretrizes/protocolos em texto completo na
+# revista Femina (femina.org.br), aberta e com PDF direto por artigo. O site
+# febrasgo.org.br foi abandonado como fonte: /protocolos-assistenciais é restrito
+# a sócios (login) e a busca trazia URLs antigas (estrutura /pt/...) que dão 404.
 GUIDELINE_SOURCES_PT = [
-    ("FEBRASGO", "febrasgo.org.br"),
+    ("FEBRASGO (Femina)", "femina.org.br"),
     ("Ministério da Saúde / CONITEC", "www.gov.br"),
 ]
 
@@ -58,18 +62,36 @@ BOOK_TARGETS = [
         "key": "tratado",
         "drive_name": "tratado-de-ginecologia-da-febrasgo.pdf",
         "index": "livros/tratado-de-ginecologia-da-febrasgo-sumario-paginas.md",
+        "lang": "pt",  # sumário em português → casa com aula.aula_tema
     },
     {
         "key": "williams",
         "drive_name": "Williams Ginecologia.pdf",
         "index": "livros/williams-ginecologia-sumario-paginas.md",
+        "lang": "es",  # sumário em espanhol → casa com terms.tema_es
     },
 ]
+
+# Confiança mínima para extrair um capítulo. Abaixo disso preferimos NÃO
+# entregar capítulo a entregar o errado (o ranker pegava sempre o topo, mesmo
+# com score ~0.1). Espelha o --limiar do CLI extrair_tema_tratado.py.
+BOOK_CONFIDENCE_FLOOR = 0.42
+
+
+class LowConfidenceMatch(Exception):
+    """Sinaliza que nenhum capítulo atingiu a confiança mínima — não é erro
+    técnico, é ausência de correspondência boa o suficiente."""
+
+    def __init__(self, best_title: str, score: float):
+        self.best_title = best_title
+        self.score = score
+        super().__init__(f"melhor match '{best_title}' com confiança {score:.2f} < {BOOK_CONFIDENCE_FLOOR:.2f}")
 
 
 @dataclass
 class SearchTerms:
     tema_en: str
+    tema_es: str
     pubmed_query: str
     uptodate_query: str
     guideline_terms_en: str
@@ -115,7 +137,7 @@ def run_phase1_bibliografia(
     result.artifacts.append(persist_ai_artifact(aula, "diretrizes_consensos.md", diretrizes_md))
 
     _step("Extraindo capítulos de livros")
-    capitulos_md, uploaded_books, book_warnings = build_book_artifacts(aula, generated_at)
+    capitulos_md, uploaded_books, book_warnings = build_book_artifacts(aula, generated_at, terms)
     result.uploaded_books.extend(uploaded_books)
     result.warnings.extend(book_warnings)
     result.artifacts.append(persist_ai_artifact(aula, "capitulos_livros.md", capitulos_md))
@@ -180,6 +202,7 @@ SEARCH_TERMS_SCHEMA = {
     "type": "OBJECT",
     "properties": {
         "tema_en": {"type": "STRING"},
+        "tema_es": {"type": "STRING"},
         "pubmed_query": {"type": "STRING"},
         "uptodate_query": {"type": "STRING"},
         "guideline_terms_en": {"type": "STRING"},
@@ -187,6 +210,7 @@ SEARCH_TERMS_SCHEMA = {
     },
     "required": [
         "tema_en",
+        "tema_es",
         "pubmed_query",
         "uptodate_query",
         "guideline_terms_en",
@@ -202,17 +226,22 @@ def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
         "gere termos de busca rastreáveis em inglês para PubMed/UpToDate/diretrizes internacionais "
         "e em português para FEBRASGO/Ministério da Saúde. Nunca invente termos sem relação clínica."
     )
-    user_prompt = f"""Aula: M{aula.modulo_num} - {aula.modulo_nome} / Aula {aula.aula_num} - {aula.aula_tema}
+    user_prompt = f"""TEMA ESPECÍFICO DA AULA (foco da busca): {aula.aula_tema}
+Contexto (módulo amplo, NÃO é o foco): M{aula.modulo_num} - {aula.modulo_nome} / Aula {aula.aula_num}
+
+REGRA CENTRAL: gere termos para o SUBTEMA específico da aula ("{aula.aula_tema}"), não para o assunto amplo do módulo. Várias aulas compartilham o mesmo módulo; se você ancorar no nome do módulo, todas retornam as mesmas referências repetidas e genéricas. Use o nome do módulo apenas como desambiguação clínica (ex.: garantir que é ginecologia), nunca como o termo principal. Aulas diferentes do mesmo módulo DEVEM gerar queries diferentes.
 
 Gere termos de busca estruturados:
-- tema_en: tradução curta e clínica do tema (1 linha em inglês).
-- pubmed_query: string PubMed em inglês usando MeSH e operadores booleanos. NÃO incluir filtros de tipo de estudo ou data (eu adiciono depois).
-- uptodate_query: termos em inglês cobrindo a tríade clínica (apresentação clínica + diagnóstico + tratamento) para retornar páginas /contents/ relevantes para uma aula médica. Evite focar em "patient education" ou "beyond the basics" (são páginas para leigos). Sem operadores booleanos.
-- guideline_terms_en: termos em inglês para buscar diretrizes em sites internacionais (ACOG, RCOG, FIGO, WHO, NAMS, ESHRE).
-- guideline_terms_pt: termos em português para buscar diretrizes nacionais (FEBRASGO, Ministério da Saúde).
+- tema_en: tradução curta e clínica do SUBTEMA da aula (1 linha em inglês).
+- tema_es: tradução curta e clínica do SUBTEMA da aula em ESPANHOL (1 linha; usada para casar com o sumário do livro Williams Ginecología, que está em espanhol). Use terminologia médica espanhola padrão.
+- pubmed_query: string PubMed em inglês usando MeSH e operadores booleanos, específica do subtema. NÃO incluir filtros de tipo de estudo ou data (eu adiciono depois).
+- uptodate_query: termos em inglês cobrindo a tríade clínica (apresentação clínica + diagnóstico + tratamento) do subtema, para retornar páginas /contents/ relevantes. Evite focar em "patient education" ou "beyond the basics" (são páginas para leigos). Sem operadores booleanos.
+- guideline_terms_en: termos em inglês para buscar diretrizes em sites internacionais (ACOG, RCOG, FIGO, WHO, NAMS, ESHRE) sobre o subtema.
+- guideline_terms_pt: termos em português para buscar diretrizes/protocolos nacionais (FEBRASGO/revista Femina, Ministério da Saúde) sobre o subtema.
 
 Exemplo para 'Sindrome dos ovarios policisticos':
 - tema_en: Polycystic ovary syndrome
+- tema_es: Síndrome de ovario poliquístico
 - pubmed_query: ("polycystic ovary syndrome"[MeSH Terms] OR "PCOS"[Title/Abstract]) AND (diagnosis OR treatment OR management)
 - uptodate_query: polycystic ovary syndrome clinical manifestations diagnosis treatment management
 - guideline_terms_en: polycystic ovary syndrome PCOS guideline
@@ -240,6 +269,7 @@ Exemplo para 'Sindrome dos ovarios policisticos':
 
     return SearchTerms(
         tema_en=_clean_text(data.get("tema_en")) or fallback.tema_en,
+        tema_es=_clean_text(data.get("tema_es")) or fallback.tema_es,
         pubmed_query=_clean_text(data.get("pubmed_query")) or fallback.pubmed_query,
         uptodate_query=_clean_text(data.get("uptodate_query")) or fallback.uptodate_query,
         guideline_terms_en=_clean_text(data.get("guideline_terms_en")) or fallback.guideline_terms_en,
@@ -252,6 +282,7 @@ def _fallback_terms(aula: AulaItem) -> SearchTerms:
     tema = aula.aula_tema or ""
     return SearchTerms(
         tema_en=tema,
+        tema_es=tema,
         pubmed_query=f'("{tema}"[Title/Abstract]) AND (gynecology OR women OR female)',
         uptodate_query=f"{tema} gynecology",
         guideline_terms_en=f"{tema} gynecology guideline",
@@ -454,17 +485,26 @@ def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTe
     pool_cap = GUIDELINES_LIMIT * 2
     pool: list[dict] = []
 
-    # Nacionais: busca por dominio (CSE com fallback DDG)
-    for source_name, domain in GUIDELINE_SOURCES_PT:
+    # Nacionais — FEBRASGO via revista Femina, resolvendo PDF direto e validando
+    # cada URL (antes os links nacionais entravam SEM validação → 404 vazavam).
+    for link in _search_femina(terms.guideline_terms_pt, limit=4):
         if len(pool) >= pool_cap:
             break
-        links = domain_search(domain=domain, terms=terms.guideline_terms_pt, limit=3)
-        for link in _rank_guideline_links(links):
+        if any(existing["url"] == link["url"] for existing in pool):
+            continue
+        pool.append(link)
+
+    # Nacionais — Ministério da Saúde / CONITEC (gov.br), também validado.
+    if len(pool) < pool_cap:
+        ms_links = domain_search(domain="www.gov.br", terms=terms.guideline_terms_pt, limit=3)
+        for link in _rank_guideline_links(ms_links):
             if len(pool) >= pool_cap:
                 break
             if any(existing["url"] == link["url"] for existing in pool):
                 continue
-            pool.append({**link, "source": source_name, "lang": "pt"})
+            if not _validate_url(link["url"]):
+                continue
+            pool.append({**link, "source": "Ministério da Saúde", "lang": "pt"})
 
     # Internacionais: Gemini sugere URL canonica + validacao HTTP
     if len(pool) < pool_cap:
@@ -740,12 +780,65 @@ def _rank_guideline_links(links: list[dict]) -> list[dict]:
     return annotated
 
 
+FEMINA_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+# PDF do artigo na Femina: .../wp-content/uploads/.../<id>/<id>.pdf
+FEMINA_PDF_RE = re.compile(
+    r'href="(https://femina\.org\.br/wp-content/uploads/[^"]+\.pdf)"', re.IGNORECASE
+)
+
+
+def _resolve_femina_pdf(article_url: str, timeout: int = 10) -> str:
+    """Abre a página do artigo/protocolo na Femina e devolve a URL do PDF
+    direto (baixável pelo runner), ou '' se não encontrar."""
+    try:
+        req = urllib.request.Request(article_url, headers={"User-Agent": FEMINA_BROWSER_UA})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            page = resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+    match = FEMINA_PDF_RE.search(page)
+    return match.group(1) if match else ""
+
+
+def _search_femina(terms: str, limit: int) -> list[dict]:
+    """Busca protocolos/diretrizes da FEBRASGO na revista Femina e resolve o
+    PDF direto de cada artigo. Só retorna links validados (sem 404)."""
+    candidates = domain_search(domain="femina.org.br", terms=f"{terms} protocolo", limit=limit * 2)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for cand in candidates:
+        url = cand.get("url") or ""
+        # Conteúdo real da revista mora em /article/<slug>/.
+        if "/article/" not in url:
+            continue
+        pdf_url = _resolve_femina_pdf(url)
+        final_url = pdf_url or url
+        if final_url in seen:
+            continue
+        if not _validate_url(final_url):
+            continue
+        seen.add(final_url)
+        out.append({
+            "title": cand.get("title") or "(sem título)",
+            "url": final_url,
+            "source": "FEBRASGO (Femina)",
+            "lang": "pt",
+            "is_pdf": bool(pdf_url),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Livros (mantido — está funcionando bem)
 # ---------------------------------------------------------------------------
 
 
-def build_book_artifacts(aula: AulaItem, generated_at: str) -> tuple[str, list[dict], list[str]]:
+def build_book_artifacts(aula: AulaItem, generated_at: str, terms: SearchTerms) -> tuple[str, list[dict], list[str]]:
     uploaded: list[dict] = []
     warnings: list[str] = []
     rows: list[str] = []
@@ -764,6 +857,10 @@ def build_book_artifacts(aula: AulaItem, generated_at: str) -> tuple[str, list[d
             drive_name = book["drive_name"]
             item = available.get(drive_name)
             index_path = REPO_ROOT / book["index"]
+            # Sumário do Williams está em espanhol → casar com tema_es; Tratado
+            # está em PT → casar com o tema da aula. Sem isso, PT vs ES quebra a
+            # similaridade e o Williams quase sempre vinha com capítulo errado.
+            query = terms.tema_es if book.get("lang") == "es" else aula.aula_tema
             if not item:
                 rows.append(f"- **{title}**: PDF não encontrado no Drive (`{drive_name}`).")
                 continue
@@ -781,7 +878,8 @@ def build_book_artifacts(aula: AulaItem, generated_at: str) -> tuple[str, list[d
                     source_pdf=source_pdf,
                     index_path=index_path,
                     output_path=output_path,
-                    query=aula.aula_tema,
+                    query=query,
+                    min_confidence=BOOK_CONFIDENCE_FLOOR,
                 )
                 uploaded_file = upload_local_file_for_aula(
                     aula=aula,
@@ -796,6 +894,16 @@ def build_book_artifacts(aula: AulaItem, generated_at: str) -> tuple[str, list[d
                 rows.append(
                     f"- **{title}** — capítulo: {selected.title} (p. {selected.start}-{selected.end}) · "
                     f"confiança {confidence:.2f} · {pages} pág. extraídas → {file_link}"
+                )
+            except LowConfidenceMatch as exc:
+                # Não é erro técnico: simplesmente não há capítulo bom o bastante.
+                warnings.append(
+                    f"{title}: sem capítulo com confiança suficiente para "
+                    f"'{query}' (melhor: {exc.best_title} · {exc.score:.2f}). Capítulo NÃO extraído."
+                )
+                rows.append(
+                    f"- **{title}**: sem capítulo com confiança ≥ {BOOK_CONFIDENCE_FLOOR:.2f} "
+                    f"(melhor candidato: {exc.best_title} · {exc.score:.2f}) — revisar manualmente."
                 )
             except Exception as exc:
                 warnings.append(f"falha ao extrair {title}: {exc}")
@@ -1150,12 +1258,22 @@ def _load_book_extractor(warnings: list[str]):
     return module
 
 
-def _extract_book_pages(extractor, book_title: str, source_pdf: Path, index_path: Path, output_path: Path, query: str):
+def _extract_book_pages(
+    extractor,
+    book_title: str,
+    source_pdf: Path,
+    index_path: Path,
+    output_path: Path,
+    query: str,
+    min_confidence: float = 0.0,
+):
     entries = extractor.load_index(index_path)
     ranked = extractor.rank_entries(query, entries)
     if not ranked:
         raise RuntimeError("nenhuma entrada no sumário")
     selected, confidence = ranked[0]
+    if confidence < min_confidence:
+        raise LowConfidenceMatch(selected.title, confidence)
     pages = extractor.extract_pages(source_pdf, [selected], output_path, dedupe=True)
     return selected, confidence, pages
 
