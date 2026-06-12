@@ -170,26 +170,44 @@ def advance_to_texto_feito(aula_id: str) -> None:
 
 # --- download do UpToDate via script existente -----------------------------
 
-def baixar_uptodate(urls: list[str], outdir: Path) -> list[Path]:
-    """Roda baixar_uptodate.py para a lista de URLs e devolve os PDFs gerados.
-    Como `outdir` é exclusivo desta aula/execução, qualquer *.pdf criado ali é
-    resultado desta chamada."""
+def baixar_uptodate(urls: list[str], outdir: Path) -> list[tuple[str, Optional[Path]]]:
+    """Baixa cada URL do UpToDate via baixar_uptodate.py e devolve, NA ORDEM de
+    entrada, uma tupla (url, pdf|None) por link.
+
+    Cada URL é baixada no seu próprio subdiretório, então sabemos exatamente qual
+    URL gerou (ou não) PDF — antes a atribuição era por posição no glob da pasta,
+    o que marcava o link errado como pendente quando algum falhava no meio."""
+    outdir.mkdir(parents=True, exist_ok=True)
     if not urls:
         return []
     if not UPTODATE_SCRIPT.exists():
         log(f"  AVISO: script do UpToDate não encontrado em {UPTODATE_SCRIPT}; pulando UpToDate.")
-        return []
-    outdir.mkdir(parents=True, exist_ok=True)
-    urls_file = outdir / "_uptodate_urls.txt"
-    urls_file.write_text("\n".join(urls))
+        return [(u, None) for u in urls]
+
     log(f"  UpToDate: {len(urls)} link(s) → {UPTODATE_SCRIPT.name}")
-    proc = subprocess.run(
-        [sys.executable, str(UPTODATE_SCRIPT), str(urls_file), "--outdir", str(outdir), "--delay", "3"],
-        text=True, capture_output=True, timeout=60 * 30,
-    )
-    if proc.returncode not in (0, 1):  # 1 = algumas falhas; ainda pode ter PDFs
-        log(f"  UpToDate retornou {proc.returncode}: {proc.stderr[-400:]}")
-    return sorted(p for p in outdir.glob("uptodate-*.pdf"))
+    resultados: list[tuple[str, Optional[Path]]] = []
+    for i, url in enumerate(urls):
+        sub = outdir / f"ut_{i}"
+        sub.mkdir(parents=True, exist_ok=True)
+        urls_file = sub / "_url.txt"
+        urls_file.write_text(url + "\n")
+        proc = subprocess.run(
+            [sys.executable, str(UPTODATE_SCRIPT), str(urls_file), "--outdir", str(sub), "--delay", "1"],
+            text=True, capture_output=True, timeout=60 * 10,
+        )
+        pdfs = sorted(sub.glob("uptodate-*.pdf"))
+        if pdfs:
+            # Move pro outdir raiz com nome único (pode haver títulos repetidos entre aulas).
+            dest = outdir / pdfs[0].name
+            if dest.exists():
+                dest = outdir / f"{pdfs[0].stem}-{i}.pdf"
+            pdfs[0].replace(dest)
+            resultados.append((url, dest))
+        else:
+            if proc.returncode not in (0, 1):
+                log(f"  UpToDate falhou em {url} (rc={proc.returncode}): {proc.stderr[-300:]}")
+            resultados.append((url, None))
+    return resultados
 
 
 # --- orquestração por aula --------------------------------------------------
@@ -244,17 +262,18 @@ def processar_aula(aula_id: str) -> None:
         # ficam listados na bibliografia para uso manual/NotebookLM; capítulos de
         # livro já vão para o Drive na geração da bibliografia.
         uptodate = [l for l in links if l["kind"] == "uptodate"]
-        uptodate_urls = [l["url"] for l in uptodate]
-        ut_pdfs = baixar_uptodate(uptodate_urls, workdir)
-        baixados.extend(ut_pdfs)
-        # UpToDate que não viraram PDF (falha de acesso/login) entram como manuais.
-        if len(ut_pdfs) < len(uptodate_urls):
-            faltam = len(uptodate_urls) - len(ut_pdfs)
-            log(f"  UpToDate: {len(ut_pdfs)}/{len(uptodate_urls)} baixados ({faltam} para revisar)")
-            for l in uptodate[len(ut_pdfs):]:
+        resultados = baixar_uptodate([l["url"] for l in uptodate], workdir)
+        # Atribuição exata: cada link sabe se virou PDF ou não (mesma ordem de entrada).
+        for l, (_url, pdf) in zip(uptodate, resultados):
+            if pdf is not None:
+                baixados.append(pdf)
+            else:
                 pendentes.append({"title": l.get("title", ""), "url": l["url"],
                                   "source": l.get("source", "UpToDate"),
-                                  "motivo": "UpToDate não baixado (verifique o login no navegador)"})
+                                  "motivo": "UpToDate não baixado automaticamente (revisar acesso/redirect)"})
+        n_falhas = sum(1 for _u, pdf in resultados if pdf is None)
+        if n_falhas:
+            log(f"  UpToDate: {len(resultados) - n_falhas}/{len(resultados)} baixados ({n_falhas} para revisar)")
 
         # Sobe os PDFs do UpToDate para o Drive.
         enviados: list[str] = []
