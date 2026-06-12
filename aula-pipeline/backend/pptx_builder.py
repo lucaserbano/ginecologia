@@ -17,8 +17,16 @@ from pathlib import Path
 from pptx import Presentation
 from pptx.oxml.ns import qn
 
-# Linha separadora de blocos: linha contendo apenas 4+ hifens.
-_BLOCK_SEP = re.compile(r"(?m)^[ \t]*-{4,}[ \t]*$")
+# Linha separadora de blocos: linha contendo apenas 3+ hifens. O texto colado do
+# NotebookLM separa os parágrafos com "---" (3 hifens), então exigir 4+ fazia
+# nenhuma quebra casar e tudo caía num único slide.
+_BLOCK_SEP = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
+
+# Citações do NotebookLM no corpo do texto: números entre colchetes, incluindo
+# listas/intervalos como [1], [1, 2], [3-5]. Removidas do PPTX (a rastreabilidade
+# fica nos .md de bibliografia e no slide final de referências). NÃO casa links
+# markdown [texto](url) nem [sic], porque exige só dígitos/vírgulas/traços dentro.
+_CITATION_RE = re.compile(r"[ \t]*\[\d+(?:\s*[,–—-]\s*\d+)*\]")
 
 TEMPLATE_FILENAME = "MX AY.pptx"
 
@@ -47,6 +55,16 @@ def template_path() -> Path:
     raise FileNotFoundError(
         f"Template '{TEMPLATE_FILENAME}' não encontrado em aulas/templates."
     )
+
+
+def strip_citations(texto: str) -> str:
+    """Remove citações no formato [N] (ex.: [1], [1, 2], [3-5]) do corpo do texto.
+    Tira também o espaço que sobraria antes da pontuação e colapsa espaços duplos.
+    Preserva links markdown [texto](url) e marcadores como [sic]."""
+    out = _CITATION_RE.sub("", texto or "")
+    out = re.sub(r" +([.,;:!?])", r"\1", out)  # "palavra ." -> "palavra."
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out
 
 
 def split_blocks(texto: str) -> list[str]:
@@ -280,6 +298,9 @@ def build_pptx(
     """Monta o .pptx da aula. Retorna (bytes, numero_de_slides).
     Se `referencias_text` for informado, adiciona um slide final com as
     referências (fonte reduzida automaticamente para caber)."""
+    # Remove as citações [N] do corpo antes de dividir em slides (a rastreabilidade
+    # fica nos .md de bibliografia e no slide final de referências).
+    texto = strip_citations(texto)
     blocks = split_blocks(texto)
     if not blocks:
         blocks = [(texto or "").strip() or "(sem texto)"]
