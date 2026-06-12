@@ -93,9 +93,14 @@ class LinkPendenteManual(BaseModel):
 
 
 class DownloadJob(BaseModel):
-    """Estado de um job de download de PDFs disparado pelo dashboard e
-    executado pelo runner local. Orthogonal ao `status` da aula."""
-    tipo: Literal["download_pdfs"] = "download_pdfs"
+    """Estado de um job disparado pelo dashboard e executado pelo runner local.
+    Orthogonal ao `status` da aula. Dois tipos usam o mesmo modelo:
+    - `download_pdfs`: baixa as paginas do UpToDate e sobe ao Drive.
+    - `gerar_texto_notebooklm`: cria o notebook no NotebookLM com as fontes do
+      Drive, roda o prompt da aula e cola o roteiro no editor do kanban.
+    Em ambos, `baixados` lista o que deu certo (PDFs/fontes) e
+    `pendentes_manuais` o que ficou para revisar."""
+    tipo: Literal["download_pdfs", "gerar_texto_notebooklm"] = "download_pdfs"
     status: Literal["pendente", "em_andamento", "concluido", "erro"] = "pendente"
     criado_em: datetime
     atualizado_em: datetime

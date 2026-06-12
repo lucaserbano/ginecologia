@@ -11,12 +11,12 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import re
 from drive_artifacts import read_markdown_file_from_drive, write_markdown_file_to_drive
-from drive_client import DriveAuthError, build_drive
+from drive_client import DriveAuthError, build_drive, download_file_bytes
 from drive_sync import (
     bootstrap_drive_structure,
     cleanup_duplicates_all,
@@ -211,6 +211,25 @@ def get_aula_drive_files(aula_id: str) -> dict:
         return {"ok": True, "aula_id": aula.id, "count": len(files), "files": files}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Falha ao listar arquivos no Drive: {exc}")
+
+
+@app.get("/api/aulas/{aula_id}/drive-files/{file_id}/download")
+def download_aula_drive_file(aula_id: str, file_id: str) -> Response:
+    """Streama os bytes de um arquivo do Drive da aula. Usado pelo runner local
+    como fallback de ingestão no NotebookLM quando `source add-drive` falha."""
+    ok, message = ensure_drive_env()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    try:
+        service = build_drive(interactive=False)
+    except DriveAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    try:
+        content = download_file_bytes(service, file_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Falha ao baixar arquivo do Drive: {exc}")
+    return Response(content=content, media_type="application/pdf")
 
 
 @app.post("/api/aulas/{aula_id}/upload")
@@ -889,6 +908,35 @@ def enfileirar_download_pdfs(aula_id: str) -> dict:
 
     agora = _dt.utcnow()
     aula.job = DownloadJob(status="pendente", criado_em=agora, atualizado_em=agora)
+    save_aula(aula)
+    return {"ok": True, "ja_em_andamento": False, "job": aula.job.model_dump(mode="json")}
+
+
+@app.post("/api/aulas/{aula_id}/job/gerar-texto-notebooklm")
+def enfileirar_gerar_texto_notebooklm(aula_id: str) -> dict:
+    """Enfileira um job para o runner local gerar o roteiro no NotebookLM
+    (cria o notebook, sobe as fontes do Drive, roda o prompt e cola o texto).
+    O job é ortogonal ao `status`; o runner avança para `texto_feito` ao colar."""
+    from datetime import datetime as _dt
+    state = load_state()
+    aula = _find_aula(state, aula_id)
+    if not aula:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    if not aula.drive_folder_id:
+        raise HTTPException(status_code=400, detail="Aula sem pasta Drive vinculada.")
+    if aula.status != "pdfs_baixados":
+        raise HTTPException(
+            status_code=400,
+            detail="Só é possível gerar o texto do NotebookLM na etapa 'PDFs baixados'.",
+        )
+
+    if aula.job and aula.job.status in {"pendente", "em_andamento"}:
+        return {"ok": True, "ja_em_andamento": True, "job": aula.job.model_dump(mode="json")}
+
+    agora = _dt.utcnow()
+    aula.job = DownloadJob(
+        tipo="gerar_texto_notebooklm", status="pendente", criado_em=agora, atualizado_em=agora
+    )
     save_aula(aula)
     return {"ok": True, "ja_em_andamento": False, "job": aula.job.model_dump(mode="json")}
 

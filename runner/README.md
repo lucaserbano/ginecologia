@@ -66,6 +66,67 @@ python3 runner/runner.py --aula M10_A1
 | `NCBI_API_KEY` | (vazio) | acelera/eleva o rate limit do PubMed/PMC |
 | `USE_BROWSER_PDF` | `1` | usa o agent-browser para PMC/diretrizes/PDFs diretos. `0` volta ao HTTP. |
 
+## Fase 2 — Gerar texto do NotebookLM
+
+O mesmo runner também processa o job **"Gerar texto do NotebookLM"** (botão na
+coluna *PDFs baixados* do dashboard). O fluxo (`notebooklm_runner.py`):
+
+1. Dashboard enfileira `POST /api/aulas/{id}/job/gerar-texto-notebooklm`
+   (`tipo=gerar_texto_notebooklm`).
+2. O runner cria **um notebook por aula**, nomeado `MX AY` (ex.: `M10 A1`).
+3. Sobe como fontes **todos os PDFs** de `03_pdfs_artigos` (UpToDate + baixados
+   manualmente) e `02_livros_extraidos` — via `notebooklm source add-drive` pelo
+   file ID (mesma conta Google); se a CLI recusar, baixa o PDF do Drive
+   (`GET .../drive-files/{id}/download`) e usa `source add`.
+4. Sobe as **diretrizes de roteirização** (`aulas/templates/system_prompt_certo.md`)
+   convertidas em PDF (fpdf2; fallback: text source).
+5. Roda `notebooklm ask` com o prompt de `aulas/templates/prompt_certo.md` (o tema
+   da aula substitui `[tema da aula aqui]`).
+6. Cola o roteiro no kanban (`PUT /texto`) e avança `pdfs_baixados → texto_feito`.
+
+### Pré-requisitos da Fase 2 (one-time)
+
+```bash
+pip install "notebooklm-py[browser]"
+playwright install chromium
+notebooklm auth check    # login Google: erbano.lho@gmail.com
+```
+
+Ver também `notebooklm-integration/SKILL.md`. Config: `NOTEBOOKLM_BIN` (default
+`notebooklm`).
+
+### Testar uma aula específica
+
+```bash
+# roda a geração do NotebookLM para uma aula em 'PDFs baixados':
+python3 runner/runner.py --aula M10_A1 --notebooklm
+```
+
+## Lançadores de duplo-clique (.command) e outra máquina
+
+Na pasta `runner/` há 4 atalhos `.command` (dois cliques no Finder). Eles se
+localizam sozinhos — funcionam em qualquer Mac, sem editar caminhos:
+
+| Arquivo | Para quê |
+|---|---|
+| `UpToDate - Fazer login` | login no UpToDate (agent-browser), 1ª vez / quando expira |
+| `UpToDate - Baixar` | processa os jobs de download (`runner.py --once --only download_pdfs`) |
+| `NotebookLM - Instalar (1a vez)` | setup do ambiente NotebookLM **uma vez por computador** (cria venv via `uv`, instala `notebooklm-py`, faz o login Google) |
+| `NotebookLM - Gerar texto` | processa os jobs do NotebookLM (`runner.py --once --only gerar_texto_notebooklm`) usando o venv `~/.venvs/gineco-nlm` |
+
+O flag `--only <tipo>` mantém os dois fluxos separados: UpToDate roda no Python do
+sistema + agent-browser; NotebookLM roda no venv com `notebooklm-py`/`fpdf2`. Assim
+um lançador nunca pega o job do outro.
+
+**Para usar numa máquina nova** (a pasta chega pelo iCloud ou `git pull`):
+1. UpToDate: dê o login (`UpToDate - Fazer login`) — o perfil do navegador é por
+   máquina.
+2. NotebookLM: rode `NotebookLM - Instalar (1a vez)` — faz tudo (ambiente + login
+   Google `erbano.lho@gmail.com`). Depois é só `NotebookLM - Gerar texto`.
+
+As autenticações (UpToDate e NotebookLM) e o ambiente Python **não** sincronizam
+pelo iCloud: são por computador. Por isso o passo de instalar/logar é por máquina.
+
 ## Limitações conhecidas
 
 - O runner não tenta burlar paywall. Texto completo de PubMed sem versão no PMC,

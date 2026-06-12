@@ -204,31 +204,37 @@ function renderCardStateBlock(aula) {
 
 function renderJobBlock(aula) {
   const job = aula.job;
-  if (!job || job.tipo !== "download_pdfs") return "";
+  if (!job) return "";
+  const isNotebook = job.tipo === "gerar_texto_notebooklm";
+  if (job.tipo !== "download_pdfs" && !isNotebook) return "";
+  const label = isNotebook ? "Gerar texto do NotebookLM" : "Download do UpToDate";
   if (job.status === "pendente" || job.status === "em_andamento") {
     const msg = job.status === "pendente"
       ? "Na fila — runner local vai processar."
-      : (job.mensagem || "Baixando PDFs…");
+      : (job.mensagem || (isNotebook ? "Gerando roteiro no NotebookLM…" : "Baixando PDFs…"));
     return `
       <div class="card-progress">
         <div class="spinner"></div>
         <div>
-          <p class="progress-label">Download do UpToDate</p>
+          <p class="progress-label">${label}</p>
           <p class="progress-msg">${escapeHtml(msg)}</p>
         </div>
       </div>`;
   }
   if (job.status === "erro") {
-    return `<div class="card-error"><strong>Download falhou:</strong><ul><li>${escapeHtml(job.mensagem || "Sem detalhes.")}</li></ul></div>`;
+    const titulo = isNotebook ? "Geração falhou:" : "Download falhou:";
+    return `<div class="card-error"><strong>${titulo}</strong><ul><li>${escapeHtml(job.mensagem || "Sem detalhes.")}</li></ul></div>`;
   }
   // concluido
   const pend = job.pendentes_manuais || [];
+  const summaryLabel = isNotebook ? "fonte(s) não ingerida(s)" : "para baixar manual";
   const pendHtml = pend.length
-    ? `<details class="job-pendentes"><summary>${pend.length} para baixar manual</summary><ul>${pend
+    ? `<details class="job-pendentes"><summary>${pend.length} ${summaryLabel}</summary><ul>${pend
         .map((p) => `<li>${p.url ? `<a href="${escapeAttr(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>` : escapeHtml(p.title || "—")}${p.motivo ? ` <span class="biblio-meta">${escapeHtml(p.motivo)}</span>` : ""}</li>`)
         .join("")}</ul></details>`
     : "";
-  return `<div class="job-done"><p class="progress-msg">✓ ${escapeHtml(job.mensagem || "Download concluído.")}</p>${pendHtml}</div>`;
+  const doneMsg = job.mensagem || (isNotebook ? "Roteiro gerado." : "Download concluído.");
+  return `<div class="job-done"><p class="progress-msg">✓ ${escapeHtml(doneMsg)}</p>${pendHtml}</div>`;
 }
 
 function renderCardActions(aula) {
@@ -255,9 +261,14 @@ function renderCardActions(aula) {
       buttons.push(actionBtn("marcar-pdfs-baixados", "PDFs baixados", "color-pdf"));
       break;
 
-    case "pdfs_baixados":
-      buttons.push(editorBtn(aula, "Colar texto do NotebookLM", "color-texto"));
+    case "pdfs_baixados": {
+      const gerando = aula.job && (aula.job.status === "pendente" || aula.job.status === "em_andamento");
+      buttons.push(
+        `<button class="btn next-action color-texto" data-gerar-texto="${aula.id}" ${gerando ? "disabled" : ""}>${gerando ? "Gerando no NotebookLM…" : "Gerar texto do NotebookLM"}</button>`
+      );
+      buttons.push(editorBtn(aula, "Colar/editar manualmente", "color-default"));
       break;
+    }
 
     case "texto_feito":
       buttons.push(editorBtn(aula, "Editar texto", "color-texto"));
@@ -353,6 +364,29 @@ async function baixarPdfs(aulaId) {
   }
 }
 
+async function gerarTextoNotebookLM(aulaId) {
+  if (!apiAvailable) {
+    showToast("Indisponível em modo somente leitura.", true);
+    return;
+  }
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/aulas/${encodeURIComponent(aulaId)}/job/gerar-texto-notebooklm`,
+      { method: "POST" }
+    );
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) throw new Error(payload.detail || payload.message || "Falha");
+    showToast(
+      payload.ja_em_andamento
+        ? "Geração já está em andamento."
+        : "Geração enfileirada — o runner local vai criar o notebook e rodar o prompt."
+    );
+    await loadAll(false);
+  } catch (err) {
+    showToast(`Erro ao gerar texto: ${err.message}`, true);
+  }
+}
+
 function livrosBtn(aula) {
   const folderId = aula.drive_subfolders?.["02_livros_extraidos"];
   if (!folderId) {
@@ -400,6 +434,9 @@ function attachCardHandlers(card, aula) {
   });
   card.querySelectorAll("[data-baixar-pdfs]").forEach((btn) => {
     btn.addEventListener("click", () => baixarPdfs(aula.id));
+  });
+  card.querySelectorAll("[data-gerar-texto]").forEach((btn) => {
+    btn.addEventListener("click", () => gerarTextoNotebookLM(aula.id));
   });
   card.querySelectorAll("[data-drive-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {

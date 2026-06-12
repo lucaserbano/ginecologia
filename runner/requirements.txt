@@ -1,1 +1,2 @@
 requests>=2.31
+fpdf2>=2.7  # gera o PDF das diretrizes de roteirização para subir ao NotebookLM

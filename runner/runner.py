@@ -43,6 +43,7 @@ import requests
 
 import pdf_sources as pdfsrc
 import browser_pdf
+import notebooklm_runner
 
 BACKEND_URL = os.environ.get(
     "BACKEND_URL", "https://gineco-api-468351448933.us-central1.run.app"
@@ -121,6 +122,48 @@ def try_advance_status(aula_id: str) -> None:
     'bibliografia_pronta'; em outros status o backend recusa e ignoramos)."""
     try:
         session.post(f"{BACKEND_URL}/api/aulas/{aula_id}/actions/marcar-pdfs-baixados", timeout=30)
+    except Exception:
+        pass
+
+
+# --- backend: NotebookLM (Fase 2) ------------------------------------------
+
+# Subpastas do Drive cujos PDFs viram fontes do notebook: todos os artigos
+# (UpToDate, baixados manualmente, etc.) + os capítulos de livro extraídos.
+NOTEBOOK_SOURCE_LABELS = {"03_pdfs_artigos", "02_livros_extraidos"}
+
+
+def get_aula(aula_id: str) -> dict:
+    r = session.get(f"{BACKEND_URL}/api/aulas/{aula_id}", timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_drive_files(aula_id: str) -> list[dict]:
+    r = session.get(f"{BACKEND_URL}/api/aulas/{aula_id}/drive-files", timeout=120)
+    r.raise_for_status()
+    return r.json().get("files", [])
+
+
+def download_drive_file(aula_id: str, file_id: str) -> bytes:
+    r = session.get(
+        f"{BACKEND_URL}/api/aulas/{aula_id}/drive-files/{file_id}/download", timeout=180
+    )
+    r.raise_for_status()
+    return r.content
+
+
+def put_texto(aula_id: str, conteudo: str) -> None:
+    r = session.put(
+        f"{BACKEND_URL}/api/aulas/{aula_id}/texto", json={"conteudo": conteudo}, timeout=120
+    )
+    r.raise_for_status()
+
+
+def advance_to_texto_feito(aula_id: str) -> None:
+    """Avança 'pdfs_baixados' → 'texto_feito' (o backend recusa em outros status)."""
+    try:
+        session.post(f"{BACKEND_URL}/api/aulas/{aula_id}/actions/salvar-texto-inicial", timeout=30)
     except Exception:
         pass
 
@@ -246,14 +289,73 @@ def processar_aula(aula_id: str) -> None:
             pass
 
 
-def processar_pendentes_uma_vez() -> int:
+def processar_notebooklm(aula_id: str) -> None:
+    """Fase 2: cria o notebook no NotebookLM com as fontes do Drive, roda o
+    prompt da aula e cola o roteiro no editor do kanban (avança p/ texto_feito)."""
+    log(f"NotebookLM: processando {aula_id}…")
+    update_job(aula_id, "em_andamento", mensagem="Criando notebook e subindo fontes…")
+
+    aula = get_aula(aula_id)
+    tema = aula.get("aula_tema", "")
+    notebook_name = f"M{aula.get('modulo_num')} A{aula.get('aula_num')}"
+
+    # Todos os PDFs das pastas de artigos e capítulos de livro viram fontes.
+    files = get_drive_files(aula_id)
+    sources = [
+        {"id": f.get("id"), "name": f.get("name", "")}
+        for f in files
+        if f.get("mimeType") == "application/pdf"
+        and f.get("parentLabel") in NOTEBOOK_SOURCE_LABELS
+        and f.get("id")
+    ]
+    if not sources:
+        update_job(aula_id, "erro", mensagem="Nenhum PDF em 03_pdfs_artigos/02_livros_extraidos no Drive.")
+        log("  ERRO: nenhuma fonte PDF encontrada no Drive.")
+        return
+
+    log(f"  notebook '{notebook_name}' · {len(sources)} fonte(s) PDF")
+    roteiro, fontes_ok, fontes_falhas = notebooklm_runner.gerar_roteiro(
+        notebook_name=notebook_name,
+        tema=tema,
+        sources=sources,
+        download_fn=lambda fid: download_drive_file(aula_id, fid),
+        log=log,
+    )
+
+    # Cola o texto no Drive/kanban e avança o status.
+    put_texto(aula_id, roteiro)
+    advance_to_texto_feito(aula_id)
+
+    pendentes = [
+        {"title": f.get("name", "fonte"), "url": "", "source": "NotebookLM",
+         "motivo": f.get("motivo", "Fonte não ingerida")}
+        for f in fontes_falhas
+    ]
+    msg = f"Roteiro gerado e colado · {len(fontes_ok)} fonte(s) usada(s)"
+    if pendentes:
+        msg += f"; {len(pendentes)} fonte(s) não ingerida(s)."
+    update_job(aula_id, "concluido", mensagem=msg, baixados=fontes_ok, pendentes_manuais=pendentes)
+    log(f"  OK: {msg}")
+
+
+def processar_pendentes_uma_vez(only: Optional[str] = None) -> int:
+    """Processa os jobs pendentes. Se `only` for informado ('download_pdfs' ou
+    'gerar_texto_notebooklm'), ignora os demais tipos — assim o lançador do
+    UpToDate (python do sistema + agent-browser) e o do NotebookLM (venv +
+    notebooklm-py) não pegam o job um do outro."""
     jobs = get_pending_jobs()
+    if only:
+        jobs = [j for j in jobs if j.get("tipo", "download_pdfs") == only]
     if not jobs:
         return 0
     for job in jobs:
         aula_id = job["aula_id"]
+        tipo = job.get("tipo", "download_pdfs")
         try:
-            processar_aula(aula_id)
+            if tipo == "gerar_texto_notebooklm":
+                processar_notebooklm(aula_id)
+            else:
+                processar_aula(aula_id)
         except Exception as exc:
             log(f"  ERRO em {aula_id}: {exc}")
             try:
@@ -267,25 +369,32 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Runner local de download de PDFs (Fase 1).")
     parser.add_argument("--once", action="store_true", help="Processa os jobs pendentes uma vez e sai.")
     parser.add_argument("--aula", help="Força o download de uma aula específica (ex.: M10_A1).")
+    parser.add_argument("--notebooklm", action="store_true",
+                        help="Com --aula: roda a geração do NotebookLM (Fase 2) em vez do download.")
+    parser.add_argument("--only", choices=["download_pdfs", "gerar_texto_notebooklm"],
+                        help="Processa só jobs deste tipo (separa os lançadores UpToDate x NotebookLM).")
     args = parser.parse_args()
 
     log(f"Backend: {BACKEND_URL}")
     log(f"UpToDate script: {UPTODATE_SCRIPT} ({'ok' if UPTODATE_SCRIPT.exists() else 'NÃO ENCONTRADO'})")
 
     if args.aula:
-        enqueue_job(args.aula)
-        processar_aula(args.aula)
+        if args.notebooklm:
+            processar_notebooklm(args.aula)
+        else:
+            enqueue_job(args.aula)
+            processar_aula(args.aula)
         return 0
 
     if args.once:
-        n = processar_pendentes_uma_vez()
+        n = processar_pendentes_uma_vez(only=args.only)
         log(f"Concluído ({n} job(s)).")
         return 0
 
     log(f"Polling a cada {POLL_INTERVAL:.0f}s. Ctrl+C para sair.")
     while True:
         try:
-            processar_pendentes_uma_vez()
+            processar_pendentes_uma_vez(only=args.only)
         except Exception as exc:
             log(f"poll falhou: {exc}")
         time.sleep(POLL_INTERVAL)

@@ -46,7 +46,7 @@ Mais o estado lateral `erro_bloqueada` para falhas.
    - UpToDate: ate 5 links `/contents/`, ranker prioriza diagnosis/treatment/manifestations. A busca usa `domain_search`, que cai para DuckDuckGo quando o Google CSE retorna vazio (o CSE so indexa os sites cadastrados nele - FEBRASGO/MS - entao para uptodate.com sempre cairia vazio).
    - Diretrizes nacionais (FEBRASGO/MS): Google CSE + fallback DuckDuckGo. Internacionais: Gemini com **Grounding (Google Search)** quando `ENABLE_GEMINI_GROUNDING=1` (default) - o modelo busca na web em vez de recorrer a memoria; depois `_validate_url` confere cada URL. Limite total 8.
 
-**Fase 2 - Download e texto base (Eduardo)**: assistente baixa as referencias (botao "Abrir todos os links" no card), gera texto no NotebookLM, cola no editor do kanban e salva. Status: `bibliografia_pronta` -> `pdfs_baixados` -> `texto_feito`. Texto vai direto pro Drive em `04_aula_texto/04_aula_texto.md` via `PUT /api/aulas/{id}/texto`.
+**Fase 2 - Download e texto base (Eduardo)**: assistente baixa as referencias (botao "Abrir todos os links" no card). Status: `bibliografia_pronta` -> `pdfs_baixados`. Em seguida, o botao **"Gerar texto do NotebookLM"** (coluna *PDFs baixados*) enfileira um job `tipo=gerar_texto_notebooklm` (`POST /api/aulas/{id}/job/gerar-texto-notebooklm`) que o **runner local** processa (`runner/notebooklm_runner.py`): cria **um notebook por aula** (`MX AY`, ex. `M10 A1`), sobe como fontes **todos os PDFs** de `03_pdfs_artigos` (UpToDate + baixados manualmente) e `02_livros_extraidos` — via `source add-drive` por file ID (mesma conta Google `erbano.lho@gmail.com`), com fallback baixando o PDF do Drive (`GET .../drive-files/{id}/download`) -, sobe as **diretrizes de roteirizacao** (`aulas/templates/system_prompt_certo.md` em PDF; fallback text source), roda `notebooklm ask` com o prompt `aulas/templates/prompt_certo.md` (tema da aula substitui `[tema da aula aqui]`), cola o roteiro via `PUT /api/aulas/{id}/texto` e avanca `pdfs_baixados -> texto_feito` (`salvar-texto-inicial`). O botao manual "Colar/editar manualmente" (editor inline) segue como fallback. O NotebookLM e browser/login-bound (CLI `notebooklm-py`), por isso roda no runner local, **nao** no Cloud Run. Texto vai direto pro Drive em `04_aula_texto/04_aula_texto.md`.
 
 **Fase 3 - Edicao (coordenador)**: editor inline no kanban. Mesma rota `PUT /texto` para salvar. Ao concluir edicao, status `texto_feito` -> `texto_editado`.
 
@@ -90,6 +90,25 @@ Motivo: Service Account em Drive pessoal retorna `403 storageQuotaExceeded`. So 
 
 O backend (`drive_client.py`) le esses JSONs do ambiente, faz refresh em memoria quando expirado e tolera filesystem read-only (Secret Manager monta como read-only) - o refresh em memoria basta para a requisicao corrente.
 
+**Mapa de projetos GCP (cuidado - sao DOIS projetos):**
+- O OAuth client do Drive (`client_id` comeca com `475149657197-...`) vive no projeto de **numero `475149657197`**. E nesse projeto que fica a **tela de consentimento OAuth** (menu "Google Auth Platform" -> "Publico-alvo"). Link direto: `https://console.cloud.google.com/auth/audience?project=475149657197`.
+- O backend (Cloud Run, Firestore, Vertex, Secret Manager) roda no projeto `project-5ca1d427-8a03-4908-8cb`, **numero `468351448933`** (visivel na URL `gineco-api-468351448933...`).
+- Ao procurar a tela de consentimento, NAO use "My First Project" nem o projeto do backend - selecione o de numero `475149657197`.
+
+**A tela de consentimento DEVE ficar em "Em producao" (In production), nao em "Testing".** Em modo Testing o Google revoga o refresh token a cada ~7 dias, gerando `invalid_grant: Token has been expired or revoked` (aparece, p.ex., ao salvar o PPTX no Drive). Publicada em producao, o refresh token para de expirar.
+
+### Rotacao de token OAuth revogado (`invalid_grant`)
+Quando aparecer `invalid_grant: Token has been expired or revoked`, o refresh token foi invalidado e o refresh em memoria nao resolve - e preciso gerar token novo e rotacionar o secret:
+
+1. **Gerar token novo localmente** (precisa de browser p/ login com `erbano.lho@gmail.com`). Em venv com `google-auth-oauthlib`, rodar `InstalledAppFlow.from_client_secrets_file(credentials/oauth_client.json, ["https://www.googleapis.com/auth/drive"])` com `run_local_server(access_type="offline", prompt="consent")` -> salva o `creds.to_json()` (uma linha). `access_type=offline + prompt=consent` garante refresh_token novo.
+2. **Validar** antes de subir: `creds.refresh(Request())` deve passar e um GET em `drive/v3/about?fields=user(emailAddress)` deve retornar 200 com a conta certa.
+3. **Rotacionar o secret** `gineco-oauth-token` (projeto do backend): Secret Manager -> `+ NEW VERSION`. **Faca UPLOAD do arquivo .json**, nao cole no campo de texto - colar costuma inserir quebra de linha e gera `GOOGLE_OAUTH_TOKEN_JSON invalido: Invalid control character`.
+4. **Redeploy** do Cloud Run (o env do secret so e lido quando a instancia sobe): `gineco-api` -> nova revisao (pega `latest`).
+5. **Verificar**: `curl .../api/drive/status` deve retornar `{"ok":true,"authorized":true}`.
+6. Se a tela de consentimento ainda estiver em Testing, **publique para producao** (ver acima) - senao volta a quebrar em ~7 dias.
+
+Substituir tambem a copia local `credentials/token.json` pelo token novo mantem o ambiente local funcionando. Nunca deixar copias soltas do token (Desktop/tmp): contem refresh token valido.
+
 ## Variaveis de ambiente do Cloud Run
 Conjunto minimo esperado:
 - `ENABLE_AI_ACTIONS=1`
@@ -112,9 +131,12 @@ Conjunto minimo esperado:
 ## Deploy
 Sempre buildar a partir da raiz do repositorio (Dockerfile na raiz, traz `agents/` e `aulas/templates/` para a imagem):
 ```bash
-cd "/Users/lucas/Downloads/GINECOLOGIA - AFYA"
+# rodar a partir da raiz do repo (o caminho varia por maquina; o projeto roda em
+# 2 maquinas - ex.: ~/Downloads/GINECOLOGIA - AFYA e ~/Library/.../iCloud/.../GINECOLOGIA - AFYA)
+cd "<raiz do repo>"
 gcloud run deploy gineco-api --source . --project project-5ca1d427-8a03-4908-8cb --region us-central1
 ```
+Obs.: nem toda maquina tem o `gcloud` instalado. Sem `gcloud`, da pra fazer deploy e rotacao de secret pelo Console web (Cloud Run -> "Edit & deploy new revision"; Secret Manager -> "New version").
 
 Update de envs sem rebuild completo:
 ```bash
@@ -130,6 +152,8 @@ gcloud run services update gineco-api \
 - Acoes: `POST /api/aulas/{id}/actions/{gerar-bibliografia|marcar-pdfs-baixados|salvar-texto-inicial|concluir-edicao|gerar-pptx|marcar-imagens-prontas|avancar-etapa|voltar-etapa|abrir-pasta}`
 - Drive: `GET /api/drive/status`, `POST /api/drive/auth-start`, `POST /api/drive/bootstrap?force_relink=true&max_aulas=50`
 - Upload por aula: `POST /api/aulas/{id}/upload`, `POST /api/aulas/{id}/upload-browser` (multipart)
+- Jobs do runner local: `POST /api/aulas/{id}/job/download-pdfs`, `POST /api/aulas/{id}/job/gerar-texto-notebooklm`, `PUT /api/aulas/{id}/job`, `GET /api/jobs/pendentes`
+- Fontes do NotebookLM: `GET /api/aulas/{id}/drive-files`, `GET /api/aulas/{id}/drive-files/{file_id}/download` (bytes do PDF; fallback de ingestao)
 
 `bootstrap` aceita `force_relink` (religa pastas ao novo root, util em migracao para Shared Drive) e `max_aulas` (lote anti-timeout).
 
@@ -140,7 +164,7 @@ Detalhes em `aula-pipeline/backend/schemas.py` (`NEXT_ACTION_BY_STATUS`).
 
 ## Pontos de cuidado
 - Texto da aula e a Bibliografia tentam ler artefato do Drive primeiro (`drive_artifacts.py`) e so caem para estado interno se nao houver no Drive. Isso evita perder contexto quando o container reinicia.
-- Token de OAuth pode expirar; refresh em memoria funciona automaticamente, mas se o refresh token for revogado e preciso rotacionar o secret `gineco-oauth-token`.
+- Token de OAuth pode expirar; refresh em memoria funciona automaticamente, mas se o refresh token for revogado (`invalid_grant`) e preciso rotacionar o secret `gineco-oauth-token` - ver "Rotacao de token OAuth revogado" na secao de Autenticacao Google Drive. Causa raiz mais comum: tela de consentimento em modo Testing (revoga a cada ~7 dias) - manter "Em producao".
 - Nunca commitar `aula-pipeline/backend/credentials/`, `*.env`, `token.json`. Ja ignorado em `.gitignore`.
 - PDFs/PPTX nao vao para o git (ja ignorados); ficam apenas no Drive.
 - **Gemini 2.5 Pro NAO aceita `thinkingBudget=0`** (so >= 128). `openrouter_client._resolve_thinking_budget` ignora a requisicao silenciosamente quando o modelo atual e Pro. Se mudar para Flash/Flash-Lite no futuro, o `thinking_budget=0` volta a ser respeitado.
