@@ -22,6 +22,11 @@ from pptx.oxml.ns import qn
 # nenhuma quebra casar e tudo caía num único slide.
 _BLOCK_SEP = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
 
+# Separador de parágrafos (linha em branco). Usado como fallback quando o texto
+# do NotebookLM vem SEM os "---": aí cada parágrafo (bloco separado por linha em
+# branco) vira um slide.
+_PARA_SEP = re.compile(r"\n[ \t]*\n+")
+
 # Citações do NotebookLM no corpo do texto: números entre colchetes, incluindo
 # listas/intervalos como [1], [1, 2], [3-5]. Removidas do PPTX (a rastreabilidade
 # fica nos .md de bibliografia e no slide final de referências). NÃO casa links
@@ -68,8 +73,17 @@ def strip_citations(texto: str) -> str:
 
 
 def split_blocks(texto: str) -> list[str]:
-    """Divide o texto da aula nos blocos delimitados por linhas de hífens."""
-    parts = _BLOCK_SEP.split(texto or "")
+    """Divide o texto da aula em blocos (1 por slide).
+
+    Prioriza as linhas separadoras de hífens ("---"). Se o texto NÃO tiver
+    nenhuma "---" (o NotebookLM às vezes cola sem elas, só com parágrafos),
+    cai para dividir por parágrafo: cada bloco separado por linha em branco
+    vira um slide."""
+    texto = texto or ""
+    if _BLOCK_SEP.search(texto):
+        parts = _BLOCK_SEP.split(texto)
+    else:
+        parts = _PARA_SEP.split(texto)
     return [b.strip() for b in parts if b.strip()]
 
 
