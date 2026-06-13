@@ -1,0 +1,29 @@
+# Arquivos que NÃO entram no contexto do build do Cloud Run.
+# O Dockerfile só copia aula-pipeline/, agents/, aulas/templates/ e livros/*.md —
+# então venvs/PDFs/cruft local são inúteis aqui e ainda causavam crash de upload
+# (symlink quebrado de venv local, ex.: runner/.venv-nlm/bin/python3 -> python3.13).
+# NÃO ignorar *.pptx: o template aulas/templates/MX AY.pptx é necessário.
+
+.git/
+.gitignore
+.claude/
+.DS_Store
+**/.DS_Store
+
+# Bytecode
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# venvs locais (o container instala via requirements.txt no Dockerfile)
+.venv/
+venv/
+.venv-nlm/
+**/.venv/
+**/.venv-nlm/
+**/venv/
+
+# Artefatos grandes que não pertencem à imagem
+*.pdf
+node_modules/
+**/node_modules/
