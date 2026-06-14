@@ -69,10 +69,41 @@ def log(msg: str) -> None:
 
 # --- chamadas ao backend ---------------------------------------------------
 
+# Um job em_andamento parado há mais que isto é tratado como órfão (o runner que
+# o pegou morreu/foi morto sem fechá-lo) e é readotado. O teto cobre o pior caso
+# de um job legítimo (até 3 URLs × 10 min de timeout do subprocess do UpToDate).
+STALE_JOB_SECS = float(os.environ.get("STALE_JOB_SECS", "2400"))  # 40 min
+
+
+def _job_orfao(job: dict) -> bool:
+    """True se um job em_andamento está parado tempo demais (runner anterior
+    morreu sem fechá-lo). Sem timestamp = trata como órfão por segurança."""
+    ts = job.get("atualizado_em")
+    if not ts:
+        return True
+    try:
+        from datetime import datetime
+        # atualizado_em vem como UTC naive (datetime.utcnow no backend).
+        dt = datetime.fromisoformat(ts.replace("Z", "")).replace(tzinfo=None)
+        idade = (datetime.utcnow() - dt).total_seconds()
+        return idade > STALE_JOB_SECS
+    except Exception:
+        return True
+
+
 def get_pending_jobs() -> list[dict]:
     r = session.get(f"{BACKEND_URL}/api/jobs/pendentes", timeout=30)
     r.raise_for_status()
-    return [j for j in r.json().get("jobs", []) if j.get("status") == "pendente"]
+    out: list[dict] = []
+    for j in r.json().get("jobs", []):
+        st = j.get("status")
+        if st == "pendente":
+            out.append(j)
+        elif st == "em_andamento" and _job_orfao(j):
+            log(f"  readotando job órfão de {j.get('aula_id')} "
+                f"(em_andamento parado há >{STALE_JOB_SECS:.0f}s)")
+            out.append(j)
+    return out
 
 
 def get_links(aula_id: str) -> list[dict]:

@@ -977,6 +977,13 @@ def listar_jobs_pendentes() -> dict:
                     "aula_id": aula.id,
                     "tipo": aula.job.tipo,
                     "status": aula.job.status,
+                    # ISO do último update: o runner usa isto para readotar
+                    # jobs em_andamento órfãos (runner morreu sem fechar o job).
+                    "atualizado_em": (
+                        aula.job.atualizado_em.isoformat()
+                        if aula.job.atualizado_em
+                        else None
+                    ),
                     "drive_folder_id": aula.drive_folder_id,
                 }
             )
