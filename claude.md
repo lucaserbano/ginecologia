@@ -177,7 +177,44 @@ Detalhes em `aula-pipeline/backend/schemas.py` (`NEXT_ACTION_BY_STATUS`).
 - M10_A1 e M10_A2 montadas e validadas em producao (fonte 14pt, capa com nomes acentuados corrigidos no Firestore).
 - Dashboard so reflete em GitHub Pages apos `git push` na branch `main` (Pages serve `aula-pipeline/dashboard/` deste repo).
 
+## Titulo completo da aula (`aula_tema_completo`)
+O `aula_tema` (derivado do slug da pasta via `humanize_slug`) e curto e serve so para
+exibicao no kanban. Para a GERACAO usamos o titulo verbatim do PDF
+`Conteudo Pos-Gineco 2.0.pdf`, com ortografia/acentuacao corrigidas e prefixo do bloco:
+o campo `aula_tema_completo`.
+
+- Fonte: `aula-pipeline/data/temas_completos.json` (`{"temas": {"M3_A9": "...", ...}}`).
+  Para corrigir/ampliar um titulo, edite esse JSON e redeploy — nada de Firestore.
+- Overlay (nao persistido): `store._apply_tema_completo` injeta o campo em `load_state`,
+  `load_aula` e `synchronize_with_filesystem`. Por isso editar o JSON + redeploy basta;
+  o read overlay sempre vence o que estiver no Firestore.
+- Consumo: bibliografia (`phase1_bibliografia._tema_aula`, usa o completo no foco da busca,
+  no fallback de termos e no match de capitulos de livro), NotebookLM
+  (`runner.py`: `aula.get("aula_tema_completo") or aula_tema`) e capa do PPTX
+  (`server.py` -> `build_pptx(aula_nome=aula.aula_tema_completo or aula.aula_tema)`).
+- Modulos != M3 foram mapeados 1:1 a partir dos slugs das pastas; valem uma conferida
+  rapida ao gerar cada modulo (o `_meta` do JSON registra isso).
+
+## Split do Modulo 3 (18 -> 21 aulas) — handoff de producao
+O PDF lista 21 sub-temas no M3; o kanban tinha 18 (A16/A17/A18 mesclavam 2 itens cada).
+Feito no repo: pastas locais renomeadas/criadas (A16-A21), `aula-pipeline/data/aulas.json`
+(as 2 copias) e `temas_completos.json` atualizados. Falta aplicar em producao (precisa de
+ADC `gcloud auth application-default login` e deploy — NAO feito automaticamente):
+
+1. `cd aula-pipeline/backend && python migrate_m3_split.py` (dry-run) e depois `--apply`
+   — atualiza M3_A16/17/18 e cria M3_A19/20/21 no Firestore (idempotente; zera o link de Drive).
+   ESSENCIAL: a arvore `aulas_em_producao/` NAO vai para a imagem (`.dockerignore`), entao
+   `synchronize_with_filesystem` e no-op no container e o deploy sozinho NAO cria A19-A21
+   nem corrige A16-A18 — quem faz isso e esta migracao (escrita direta no Firestore).
+2. Redeploy do Cloud Run (sobe o codigo do overlay + `data/temas_completos.json`).
+   O `temas_completos.json` precisa existir em `aula-pipeline/backend/data/` (vira `/app/data/`
+   no container) — e a copia que o overlay le em producao.
+3. `POST /api/drive/bootstrap` — cria/relinka as subpastas do Drive das 6 aulas.
+4. (Opcional) apagar as 3 pastas antigas orfas do Drive (nomes antigos de A16-A18) —
+   `drive_delete_duplicate_folders.py` ou manual.
+
 ## Proximos passos sugeridos
 1. Validar Fase 2 em producao: gerar texto via NotebookLM e conferir `04_aula_texto.md` no Drive.
 2. Adicionar feedback de progresso/erro por etapa no frontend.
 3. Avaliar auto-ajuste de fonte/quebra quando um bloco de texto for muito longo (hoje a fonte e fixa em 14pt e a caixa cresce com `spAutoFit`).
+4. Conferir os `aula_tema_completo` dos modulos != M3 ao gerar cada um (mapeados 1:1, valem revisao).

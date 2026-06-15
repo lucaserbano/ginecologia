@@ -1721,7 +1721,8 @@
         "03_pdfs_artigos": "1nO_STssB6M-LolzXm4pSL-jYyCqXydBV"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Princípios gerais da anticoncepção: Papel do planejamento reprodutivo"
     },
     {
       "id": "M3_A2",
@@ -1758,7 +1759,8 @@
         "03_pdfs_artigos": "1ex91pzWJiFeYQauzmQLi2dxGlsE02WdC"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Princípios gerais da anticoncepção: Relembrando o ciclo menstrual"
     },
     {
       "id": "M3_A3",
@@ -1795,7 +1797,8 @@
         "03_pdfs_artigos": "1GwPyQGxkojtHhDXxYvxeOf98xVGzAP1w"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Princípios gerais da anticoncepção: Critérios de Elegibilidade OMS e Índice de Pearl"
     },
     {
       "id": "M3_A4",
@@ -1832,7 +1835,8 @@
         "03_pdfs_artigos": "1gJzhJqNNcAXogGA4OwrQ6e-3YX1gt_q-"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Mecanismo de ação do anticoncepcional oral"
     },
     {
       "id": "M3_A5",
@@ -1869,7 +1873,8 @@
         "03_pdfs_artigos": "1Gi6DsrpwIxVZG2kN9S6o6r6Lz8buyyQ3"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Tipos de estrogênios e progestagênios na anticoncepção"
     },
     {
       "id": "M3_A6",
@@ -1906,7 +1911,8 @@
         "03_pdfs_artigos": "1-mSAPrY0OsJsNlOH9Ps7qMem9en_cdWP"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Diferenças das pausas e cartelas"
     },
     {
       "id": "M3_A7",
@@ -1943,7 +1949,8 @@
         "03_pdfs_artigos": "1kTBm3F3mYsZDTRIOEvWNOYyhirClw5Gi"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Como orientar o uso dos anticoncepcionais orais combinados"
     },
     {
       "id": "M3_A8",
@@ -1980,7 +1987,8 @@
         "03_pdfs_artigos": "1g2l2YgJFBfV_D8FRVC1FxjdTx0rj-txM"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Qual o melhor anticoncepcional oral combinado para começar?"
     },
     {
       "id": "M3_A9",
@@ -2017,7 +2025,8 @@
         "03_pdfs_artigos": "1rBcA0tIN55gJUocDOY8h5LbN0syD2G74"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Manejo dos efeitos colaterais — sangramento desfavorável, cefaleia, mastalgia, queixas gastrointestinais, diminuição de libido"
     },
     {
       "id": "M3_A10",
@@ -2054,7 +2063,8 @@
         "03_pdfs_artigos": "1XjLe5Z_lFwHO6DiO94ZNzBg9tD9EN8MH"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados orais: Troca de método — quando e como trocar?"
     },
     {
       "id": "M3_A11",
@@ -2091,7 +2101,8 @@
         "03_pdfs_artigos": "1rDuaLK2X53LkSrwlJL4QQE7IzcB52pmv"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados não orais: Anel vaginal"
     },
     {
       "id": "M3_A12",
@@ -2128,7 +2139,8 @@
         "03_pdfs_artigos": "1gMYE_pKeu4vdCB5V1eA0-u94EydIfArK"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados não orais: Adesivo contraceptivo"
     },
     {
       "id": "M3_A13",
@@ -2165,7 +2177,8 @@
         "03_pdfs_artigos": "1FQU1naADfr4te-VGmi_LKiF7ujRGBnKu"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos hormonais combinados não orais: Injetável mensal (composição hormonal dos métodos, disponibilidade no SUS, nomes comerciais)"
     },
     {
       "id": "M3_A14",
@@ -2202,7 +2215,8 @@
         "03_pdfs_artigos": "1k67aGn9wXC9xXeEbrghHumi1JkOdof5t"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Progestagênios isolados: Pílulas de progestagênios isolados (POP)"
     },
     {
       "id": "M3_A15",
@@ -2239,18 +2253,19 @@
         "03_pdfs_artigos": "1Rs4C3k-ApJA50Feur5xRTcQ_W3QEfywi"
       },
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Progestagênios isolados: Injetável trimestral (nomes das progesteronas, disponibilidade no SUS, nomes comerciais)"
     },
     {
       "id": "M3_A16",
       "modulo_num": 3,
       "modulo_nome": "Anticoncepcao Barreira Comportamental Hormonal",
       "aula_num": 16,
-      "aula_tema": "Metodos Comportamentais e de Barreira",
+      "aula_tema": "Metodos Baseados na Percepcao da Fertilidade",
       "status": "proximas_aulas",
       "proxima_acao": "Gerar bibliografia",
-      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A16_METODOS_COMPORTAMENTAIS_E_DE_BARREIRA",
-      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A16_METODOS_COMPORTAMENTAIS_E_DE_BARREIRA",
+      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A16_METODOS_BASEADOS_NA_PERCEPCAO_DA_FERTILIDADE",
+      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A16_METODOS_BASEADOS_NA_PERCEPCAO_DA_FERTILIDADE",
       "pendencias": [],
       "pdfs": {
         "total": 0,
@@ -2267,27 +2282,24 @@
       },
       "texto_preview": null,
       "created_at": "2026-05-19T20:10:32.654116",
-      "updated_at": "2026-05-21T20:26:51.276954",
+      "updated_at": "2026-06-15T15:00:42.163126",
       "historico": [],
-      "drive_folder_id": "1MZnFw6DKkUT3Tw_AAV18lstsKN04VPdN",
-      "drive_subfolders": {
-        "01_bibliografia": "1MeNU4EExhebv9zSryXfLsPJyOr4aAHlk",
-        "02_livros_extraidos": "1dWNaGN8xTwvSrGdCKJEL57WuMkmdgCVo",
-        "03_pdfs_artigos": "1TrxE-tAq4P1bl8py4N3FAx-sIpejL5_K"
-      },
+      "drive_folder_id": null,
+      "drive_subfolders": {},
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos comportamentais e de barreira: Métodos baseados na percepção da fertilidade (temperatura basal, Ogino-Knaus, muco cervical, sintotérmico) e amenorreia lactacional"
     },
     {
       "id": "M3_A17",
       "modulo_num": 3,
       "modulo_nome": "Anticoncepcao Barreira Comportamental Hormonal",
       "aula_num": 17,
-      "aula_tema": "Esterilizacao e Contracepcao de Emergencia",
+      "aula_tema": "Metodos de Barreira e Espermicidas",
       "status": "proximas_aulas",
       "proxima_acao": "Gerar bibliografia",
-      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A17_ESTERILIZACAO_E_CONTRACEPCAO_DE_EMERGENCIA",
-      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A17_ESTERILIZACAO_E_CONTRACEPCAO_DE_EMERGENCIA",
+      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A17_METODOS_DE_BARREIRA_E_ESPERMICIDAS",
+      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A17_METODOS_DE_BARREIRA_E_ESPERMICIDAS",
       "pendencias": [],
       "pdfs": {
         "total": 0,
@@ -2304,27 +2316,24 @@
       },
       "texto_preview": null,
       "created_at": "2026-05-19T20:10:32.654116",
-      "updated_at": "2026-05-21T20:26:51.277002",
+      "updated_at": "2026-06-15T15:00:42.163126",
       "historico": [],
-      "drive_folder_id": "1ZB2PWY142dLbQDEw13IzmboCdbY6jXxy",
-      "drive_subfolders": {
-        "01_bibliografia": "1hn8BltEi5GpCx9aKWsonnHgd-5_CWQQz",
-        "02_livros_extraidos": "1V-p8BwKvYVbVC8Gs3QNdAoLORZnnpTH5",
-        "03_pdfs_artigos": "1Fnbw93Kd3_4FpGHEGFTgfaIkYX8GhtqM"
-      },
+      "drive_folder_id": null,
+      "drive_subfolders": {},
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Métodos comportamentais e de barreira: Métodos de barreira e espermicidas"
     },
     {
       "id": "M3_A18",
       "modulo_num": 3,
       "modulo_nome": "Anticoncepcao Barreira Comportamental Hormonal",
       "aula_num": 18,
-      "aula_tema": "Anticoncepcao em Situacoes Especiais",
+      "aula_tema": "Laqueadura Tubaria e Vasectomia",
       "status": "proximas_aulas",
       "proxima_acao": "Gerar bibliografia",
-      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A18_ANTICONCEPCAO_EM_SITUACOES_ESPECIAIS",
-      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A18_ANTICONCEPCAO_EM_SITUACOES_ESPECIAIS",
+      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A18_LAQUEADURA_TUBARIA_E_VASECTOMIA",
+      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A18_LAQUEADURA_TUBARIA_E_VASECTOMIA",
       "pendencias": [],
       "pdfs": {
         "total": 0,
@@ -2341,16 +2350,115 @@
       },
       "texto_preview": null,
       "created_at": "2026-05-19T20:10:32.654116",
-      "updated_at": "2026-05-21T20:26:51.277052",
+      "updated_at": "2026-06-15T15:00:42.163126",
       "historico": [],
-      "drive_folder_id": "1IVRklfjda90o4l85MVV5Je17_S5rju9V",
-      "drive_subfolders": {
-        "01_bibliografia": "1f1raqh3s7ZktrpVBGif13eJ62aah8yD4",
-        "02_livros_extraidos": "1j7hqa2tE3LmovOnMawlaF1lMx2DQm7mP",
-        "03_pdfs_artigos": "124XZUfTYkmYBSTkG6WSOWXJFbvEs2xH1"
-      },
+      "drive_folder_id": null,
+      "drive_subfolders": {},
       "ai_artifacts": {},
-      "progresso": null
+      "progresso": null,
+      "aula_tema_completo": "Esterilização e contracepção de emergência: Laqueadura tubária e vasectomia (técnicas e legislação)"
+    },
+    {
+      "id": "M3_A19",
+      "modulo_num": 3,
+      "modulo_nome": "Anticoncepcao Barreira Comportamental Hormonal",
+      "aula_num": 19,
+      "aula_tema": "Tipos de Contracepcao de Emergencia",
+      "status": "proximas_aulas",
+      "proxima_acao": "Gerar bibliografia",
+      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A19_TIPOS_DE_CONTRACEPCAO_DE_EMERGENCIA",
+      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A19_TIPOS_DE_CONTRACEPCAO_DE_EMERGENCIA",
+      "pendencias": [],
+      "pdfs": {
+        "total": 0,
+        "baixados": 0,
+        "nomes": []
+      },
+      "arquivos": {
+        "bibliografia_dir": null,
+        "livros_extraidos_dir": null,
+        "artigos_dir": null,
+        "texto_aula": null,
+        "pptx_final": null,
+        "pptx_web_view_link": null
+      },
+      "texto_preview": null,
+      "created_at": "2026-06-15T15:00:42.163126",
+      "updated_at": "2026-06-15T15:00:42.163126",
+      "historico": [],
+      "drive_folder_id": null,
+      "drive_subfolders": {},
+      "ai_artifacts": {},
+      "progresso": null,
+      "aula_tema_completo": "Esterilização e contracepção de emergência: Tipos de contracepção de emergência"
+    },
+    {
+      "id": "M3_A20",
+      "modulo_num": 3,
+      "modulo_nome": "Anticoncepcao Barreira Comportamental Hormonal",
+      "aula_num": 20,
+      "aula_tema": "Anticoncepcao Climaterio Puerperio Populacao Trans",
+      "status": "proximas_aulas",
+      "proxima_acao": "Gerar bibliografia",
+      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A20_ANTICONCEPCAO_CLIMATERIO_PUERPERIO_POPULACAO_TRANS",
+      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A20_ANTICONCEPCAO_CLIMATERIO_PUERPERIO_POPULACAO_TRANS",
+      "pendencias": [],
+      "pdfs": {
+        "total": 0,
+        "baixados": 0,
+        "nomes": []
+      },
+      "arquivos": {
+        "bibliografia_dir": null,
+        "livros_extraidos_dir": null,
+        "artigos_dir": null,
+        "texto_aula": null,
+        "pptx_final": null,
+        "pptx_web_view_link": null
+      },
+      "texto_preview": null,
+      "created_at": "2026-06-15T15:00:42.163126",
+      "updated_at": "2026-06-15T15:00:42.163126",
+      "historico": [],
+      "drive_folder_id": null,
+      "drive_subfolders": {},
+      "ai_artifacts": {},
+      "progresso": null,
+      "aula_tema_completo": "Anticoncepção em situações especiais: Climatério, puerpério e população trans"
+    },
+    {
+      "id": "M3_A21",
+      "modulo_num": 3,
+      "modulo_nome": "Anticoncepcao Barreira Comportamental Hormonal",
+      "aula_num": 21,
+      "aula_tema": "Anticoncepcao Trombose Hepatopatias Has Diabetes Gestacao",
+      "status": "proximas_aulas",
+      "proxima_acao": "Gerar bibliografia",
+      "pasta_relativa": "aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A21_ANTICONCEPCAO_TROMBOSE_HEPATOPATIAS_HAS_DIABETES_GESTACAO",
+      "pasta_absoluta": "/Users/lucas/Downloads/GINECOLOGIA - AFYA/aulas_em_producao/modulos/M3_ANTICONCEPCAO_BARREIRA_COMPORTAMENTAL_HORMONAL/M3_A21_ANTICONCEPCAO_TROMBOSE_HEPATOPATIAS_HAS_DIABETES_GESTACAO",
+      "pendencias": [],
+      "pdfs": {
+        "total": 0,
+        "baixados": 0,
+        "nomes": []
+      },
+      "arquivos": {
+        "bibliografia_dir": null,
+        "livros_extraidos_dir": null,
+        "artigos_dir": null,
+        "texto_aula": null,
+        "pptx_final": null,
+        "pptx_web_view_link": null
+      },
+      "texto_preview": null,
+      "created_at": "2026-06-15T15:00:42.163126",
+      "updated_at": "2026-06-15T15:00:42.163126",
+      "historico": [],
+      "drive_folder_id": null,
+      "drive_subfolders": {},
+      "ai_artifacts": {},
+      "progresso": null,
+      "aula_tema_completo": "Anticoncepção em situações especiais: Trombose, hepatopatias, hipertensão arterial, diabetes e gestação"
     },
     {
       "id": "M4_A1",

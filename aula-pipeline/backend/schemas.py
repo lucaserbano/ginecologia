@@ -115,6 +115,7 @@ class AulaItem(BaseModel):
     modulo_nome: str
     aula_num: int
     aula_tema: str
+    aula_tema_completo: Optional[str] = None
     status: StatusKey = "proximas_aulas"
     proxima_acao: str = "Gerar bibliografia"
     pasta_relativa: str

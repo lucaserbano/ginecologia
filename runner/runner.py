@@ -346,7 +346,9 @@ def processar_notebooklm(aula_id: str) -> None:
     update_job(aula_id, "em_andamento", mensagem="Criando notebook e subindo fontes…")
 
     aula = get_aula(aula_id)
-    tema = aula.get("aula_tema", "")
+    # Prefere o título completo (verbatim do PDF) para o foco do roteiro; cai
+    # para o título curto do kanban se o completo não estiver disponível.
+    tema = aula.get("aula_tema_completo") or aula.get("aula_tema", "")
     notebook_name = f"M{aula.get('modulo_num')} A{aula.get('aula_num')}"
 
     # Todos os PDFs das pastas de artigos e capítulos de livro viram fontes.

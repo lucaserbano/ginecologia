@@ -26,6 +26,42 @@ STATE_FILE = Path(
     )
 ).resolve()
 
+# Títulos completos/verbatim por aula (id -> texto). Fonte de `aula_tema_completo`,
+# aplicada como overlay na leitura: não é persistida no Firestore, então basta
+# editar o JSON + redeploy para atualizar. Ver aula-pipeline/data/temas_completos.json.
+PRIMARY_TEMAS_FILE = REPO_ROOT / "aula-pipeline" / "data" / "temas_completos.json"
+FALLBACK_TEMAS_FILE = BACKEND_DIR / "data" / "temas_completos.json"
+TEMAS_COMPLETOS_FILE = Path(
+    os.getenv(
+        "TEMAS_COMPLETOS_FILE",
+        str(PRIMARY_TEMAS_FILE if PRIMARY_TEMAS_FILE.exists() else FALLBACK_TEMAS_FILE),
+    )
+).resolve()
+
+_temas_completos_cache: Optional[dict[str, str]] = None
+
+
+def _load_temas_completos() -> dict[str, str]:
+    """Carrega o mapa id->título completo (cacheado). Vazio se o arquivo faltar."""
+    global _temas_completos_cache
+    if _temas_completos_cache is None:
+        try:
+            payload = json.loads(TEMAS_COMPLETOS_FILE.read_text(encoding="utf-8"))
+            _temas_completos_cache = dict(payload.get("temas", {}))
+        except Exception as exc:
+            logger.warning("Não foi possível carregar temas_completos: %s", exc)
+            _temas_completos_cache = {}
+    return _temas_completos_cache
+
+
+def _apply_tema_completo(aula: Optional[AulaItem]) -> Optional[AulaItem]:
+    """Overlay (não persistido) do título completo na aula, a partir do mapa."""
+    if aula is not None:
+        completo = _load_temas_completos().get(aula.id)
+        if completo:
+            aula.aula_tema_completo = completo
+    return aula
+
 MODULOS_ROOT = Path(
     os.getenv(
         "MODULOS_ROOT",
@@ -114,6 +150,14 @@ def _load_state_from_file() -> AulasState:
 
 
 def load_state() -> AulasState:
+    """Carrega o estado e aplica o overlay (não persistido) dos títulos completos."""
+    state = _load_state_raw()
+    for aula in state.aulas:
+        _apply_tema_completo(aula)
+    return state
+
+
+def _load_state_raw() -> AulasState:
     """Carrega o estado: Firestore (fonte de verdade) → fallback para JSON local.
 
     Se Firestore está disponível mas vazio, faz bootstrap a partir do JSON
@@ -179,16 +223,16 @@ def save_aula(aula: AulaItem) -> None:
 
 
 def load_aula(aula_id: str) -> Optional[AulaItem]:
-    """Lê uma única aula. Em Firestore é uma leitura O(1)."""
+    """Lê uma única aula (com overlay do título completo). Em Firestore é O(1)."""
     if firestore_store.is_available():
         try:
-            return firestore_store.get_aula(aula_id)
+            return _apply_tema_completo(firestore_store.get_aula(aula_id))
         except Exception as exc:
             logger.warning("Falha lendo aula %s do Firestore: %s", aula_id, exc)
     state = _load_state_from_file()
     for a in state.aulas:
         if a.id == aula_id:
-            return a
+            return _apply_tema_completo(a)
     return None
 
 
@@ -251,6 +295,7 @@ def synchronize_with_filesystem(state: AulasState) -> AulasState:
                     modulo_nome=mod_nome,
                     aula_num=aula_num,
                     aula_tema=aula_tema,
+                    aula_tema_completo=_load_temas_completos().get(aula_id),
                     status=status,
                     proxima_acao=proxima_acao,
                     pasta_relativa=str(aula_dir.relative_to(REPO_ROOT)),

@@ -455,7 +455,7 @@ def run_aula_action(
                 modulo_num=aula.modulo_num,
                 modulo_nome=aula.modulo_nome,
                 aula_num=aula.aula_num,
-                aula_nome=aula.aula_tema,
+                aula_nome=aula.aula_tema_completo or aula.aula_tema,
                 referencias_text=referencias_text,
             )
         except Exception as exc:

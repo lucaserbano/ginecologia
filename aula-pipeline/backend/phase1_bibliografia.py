@@ -219,6 +219,12 @@ SEARCH_TERMS_SCHEMA = {
 }
 
 
+def _tema_aula(aula: AulaItem) -> str:
+    """Título a usar como foco da busca: o completo (verbatim do PDF) quando
+    disponível; senão o título curto do kanban."""
+    return (getattr(aula, "aula_tema_completo", None) or aula.aula_tema or "").strip()
+
+
 def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
     fallback = _fallback_terms(aula)
     sys_prompt = (
@@ -226,10 +232,10 @@ def _generate_search_terms(aula: AulaItem, warnings: list[str]) -> SearchTerms:
         "gere termos de busca rastreáveis em inglês para PubMed/UpToDate/diretrizes internacionais "
         "e em português para FEBRASGO/Ministério da Saúde. Nunca invente termos sem relação clínica."
     )
-    user_prompt = f"""TEMA ESPECÍFICO DA AULA (foco da busca): {aula.aula_tema}
+    user_prompt = f"""TEMA ESPECÍFICO DA AULA (foco da busca): {_tema_aula(aula)}
 Contexto (módulo amplo, NÃO é o foco): M{aula.modulo_num} - {aula.modulo_nome} / Aula {aula.aula_num}
 
-REGRA CENTRAL: gere termos para o SUBTEMA específico da aula ("{aula.aula_tema}"), não para o assunto amplo do módulo. Várias aulas compartilham o mesmo módulo; se você ancorar no nome do módulo, todas retornam as mesmas referências repetidas e genéricas. Use o nome do módulo apenas como desambiguação clínica (ex.: garantir que é ginecologia), nunca como o termo principal. Aulas diferentes do mesmo módulo DEVEM gerar queries diferentes.
+REGRA CENTRAL: gere termos para o SUBTEMA específico da aula ("{_tema_aula(aula)}"), não para o assunto amplo do módulo. Várias aulas compartilham o mesmo módulo; se você ancorar no nome do módulo, todas retornam as mesmas referências repetidas e genéricas. Use o nome do módulo apenas como desambiguação clínica (ex.: garantir que é ginecologia), nunca como o termo principal. Aulas diferentes do mesmo módulo DEVEM gerar queries diferentes.
 
 Gere termos de busca estruturados:
 - tema_en: tradução curta e clínica do SUBTEMA da aula (1 linha em inglês).
@@ -279,7 +285,7 @@ Exemplo para 'Sindrome dos ovarios policisticos':
 
 
 def _fallback_terms(aula: AulaItem) -> SearchTerms:
-    tema = aula.aula_tema or ""
+    tema = _tema_aula(aula)
     return SearchTerms(
         tema_en=tema,
         tema_es=tema,
@@ -349,7 +355,7 @@ def build_pubmed_markdown(aula: AulaItem, generated_at: str, terms: SearchTerms)
 
     error_line = f"\n\n> Erro técnico na busca: {error}" if error else ""
 
-    md = f"""# PubMed — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
+    md = f"""# PubMed — M{aula.modulo_num} / Aula {aula.aula_num} · {_tema_aula(aula)}
 
 **Tema (EN):** {terms.tema_en}
 **Data:** {generated_at}
@@ -458,7 +464,7 @@ def build_uptodate_markdown(aula: AulaItem, generated_at: str, terms: SearchTerm
     else:
         items = "- (nenhum link `/contents/` encontrado — refinar termos manualmente)"
 
-    md = f"""# UpToDate — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
+    md = f"""# UpToDate — M{aula.modulo_num} / Aula {aula.aula_num} · {_tema_aula(aula)}
 
 **Data:** {generated_at}
 **Termos:** `{terms.uptodate_query}`
@@ -532,7 +538,7 @@ def build_guidelines_markdown(aula: AulaItem, generated_at: str, terms: SearchTe
     else:
         items = "- (nenhum candidato encontrado nas fontes oficiais — refinar termos manualmente)"
 
-    md = f"""# Diretrizes e Consensos — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
+    md = f"""# Diretrizes e Consensos — M{aula.modulo_num} / Aula {aula.aula_num} · {_tema_aula(aula)}
 
 **Data:** {generated_at}
 **Termos (PT):** `{terms.guideline_terms_pt}`
@@ -611,7 +617,7 @@ def _suggest_international_guidelines(aula: AulaItem, terms_en: str) -> list[dic
         '{"guidelines": [{"source": "ACOG", "title": "...", "url": "https://..."}]}'
     ) if grounded else ""
 
-    user_prompt = f"""Tema da aula: {aula.aula_tema}
+    user_prompt = f"""Tema da aula: {_tema_aula(aula)}
 Termos de busca (EN): {terms_en}
 
 Para cada uma das sociedades ({sources}), liste 2 a 3 documentos oficiais sobre o tema (total esperado: 10 a 18 candidatos).
@@ -860,7 +866,7 @@ def build_book_artifacts(aula: AulaItem, generated_at: str, terms: SearchTerms) 
             # Sumário do Williams está em espanhol → casar com tema_es; Tratado
             # está em PT → casar com o tema da aula. Sem isso, PT vs ES quebra a
             # similaridade e o Williams quase sempre vinha com capítulo errado.
-            query = terms.tema_es if book.get("lang") == "es" else aula.aula_tema
+            query = terms.tema_es if book.get("lang") == "es" else _tema_aula(aula)
             if not item:
                 rows.append(f"- **{title}**: PDF não encontrado no Drive (`{drive_name}`).")
                 continue
@@ -910,7 +916,7 @@ def build_book_artifacts(aula: AulaItem, generated_at: str, terms: SearchTerms) 
                 rows.append(f"- **{title}**: erro técnico — {exc}")
 
     table = "\n".join(rows) if rows else "- (nenhum livro processado)"
-    md = f"""# Capítulos de livros — M{aula.modulo_num} / Aula {aula.aula_num} · {aula.aula_tema}
+    md = f"""# Capítulos de livros — M{aula.modulo_num} / Aula {aula.aula_num} · {_tema_aula(aula)}
 
 **Data:** {generated_at}
 **Pasta Drive dos livros:** `{BOOKS_DRIVE_FOLDER_ID}`
@@ -947,10 +953,10 @@ def build_consolidated_markdown(
         for link in guideline_links
     ) or "- (sem resultados)"
 
-    return f"""# Bibliografia — {aula.id} · {aula.aula_tema}
+    return f"""# Bibliografia — {aula.id} · {_tema_aula(aula)}
 
 **Módulo:** M{aula.modulo_num} - {aula.modulo_nome}
-**Aula:** {aula.aula_num} - {aula.aula_tema}
+**Aula:** {aula.aula_num} - {_tema_aula(aula)}
 **Data:** {generated_at}
 **Tema (EN):** {terms.tema_en}
 **Observação do usuário:** {note or "nenhuma"}
