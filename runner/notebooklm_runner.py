@@ -28,9 +28,16 @@ from typing import Callable, Optional
 NOTEBOOKLM_BIN = os.environ.get("NOTEBOOKLM_BIN", "notebooklm")
 
 # Diretrizes de roteirização (vira uma fonte PDF no notebook) e prompt da aula.
+# Default atual: formato em parágrafos corridos (system_prompt_certo.md / prompt_certo.md).
+# Para usar o formato em tópicos/bullet-points, aponte os env vars abaixo para
+# system_prompt_topicos.md / prompt_topicos.md, ou reedite os defaults.
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "aulas" / "templates"
-SYSTEM_PROMPT_MD = TEMPLATES_DIR / "system_prompt_certo.md"
-PROMPT_MD = TEMPLATES_DIR / "prompt_certo.md"
+SYSTEM_PROMPT_MD = TEMPLATES_DIR / os.environ.get(
+    "NOTEBOOKLM_SYSTEM_PROMPT_FILE", "system_prompt_certo.md"
+)
+PROMPT_MD = TEMPLATES_DIR / os.environ.get(
+    "NOTEBOOKLM_PROMPT_FILE", "prompt_certo.md"
+)
 
 
 class NotebookLMError(RuntimeError):
